@@ -39,6 +39,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
+            type=raw,value=latest
           labels: |
             org.opencontainers.image.title=Ruida Bridge
             org.opencontainers.image.description=High-performance TCP-to-UDP relay bridge for Ruida laser controllers
