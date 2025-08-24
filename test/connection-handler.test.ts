@@ -49,8 +49,8 @@ describe("ConnectionHandler", () => {
           return null;
         }
         return {
-          type: packet[0],
-          length: (packet[1] << 8) + packet[2],
+          type: packet[0] ?? 0,
+          length: ((packet[1] ?? 0) << 8) + (packet[2] ?? 0),
           data: packet.slice(3),
         };
       };
@@ -92,7 +92,7 @@ describe("ConnectionHandler", () => {
 
       // Now can parse header
       if (packetLen === 0 && packet.length >= 3) {
-        packetLen = (packet[1] << 8) + packet[2];
+        packetLen = ((packet[1] ?? 0) << 8) + (packet[2] ?? 0);
         packet = packet.slice(3);
       }
 

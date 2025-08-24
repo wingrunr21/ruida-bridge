@@ -121,9 +121,9 @@ describe("Ruida Protocol Compliance", () => {
       }
 
       expect(chunks.length).toBe(3); // Should split into 3 chunks
-      expect(chunks[0].length).toBe(MAX_PAYLOAD_SIZE);
-      expect(chunks[1].length).toBe(MAX_PAYLOAD_SIZE);
-      expect(chunks[2].length).toBe(60); // Remainder
+      expect(chunks[0]?.length).toBe(MAX_PAYLOAD_SIZE);
+      expect(chunks[1]?.length).toBe(MAX_PAYLOAD_SIZE);
+      expect(chunks[2]?.length).toBe(60); // Remainder
     });
   });
 

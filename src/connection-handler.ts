@@ -40,7 +40,7 @@ export class ConnectionHandler {
     this.status.ok(`Connection from: ${clientAddr}`);
 
     // Create UDP socket for outgoing (to laser)
-    const outSocket = Bun.udpSocket({
+    const outSocket = await Bun.udpSocket({
       socket: {
         data(_socket, _buf, _port, _addr) {
           // Not used for outgoing
@@ -57,7 +57,7 @@ export class ConnectionHandler {
     let lastLen = 0;
     let packetType = PacketType.Laser;
 
-    const inSocket = Bun.udpSocket({
+    const inSocket = await Bun.udpSocket({
       port: this.config.fromLaserPort,
       socket: {
         data(inSock, buf, _port, _addr) {
@@ -73,7 +73,7 @@ export class ConnectionHandler {
             }
           } else if (data.length > 2) {
             // Validate checksum for multi-byte responses
-            const receivedChecksum = (data[0] << 8) | data[1];
+            const receivedChecksum = ((data[0] ?? 0) << 8) | (data[1] ?? 0);
             const payload = data.slice(2);
 
             // Calculate expected checksum
@@ -93,7 +93,7 @@ export class ConnectionHandler {
             // Forward payload (without checksum) to client via TCP
             if (socket && !socket.closed) {
               const header = Buffer.from([
-                packetType,
+                PacketType.Laser, // UDP responses are laser data
                 (payload.length >> 8) & 0xff,
                 payload.length & 0xff,
               ]);
@@ -110,7 +110,7 @@ export class ConnectionHandler {
           if (data.length === 1 && lastLen <= 500) {
             if (socket && !socket.closed) {
               const header = Buffer.from([
-                packetType,
+                PacketType.Laser, // UDP ACKs are laser responses
                 (data.length >> 8) & 0xff,
                 data.length & 0xff,
               ]);
@@ -138,8 +138,12 @@ export class ConnectionHandler {
       if (timeoutCheckInterval) {
         clearInterval(timeoutCheckInterval);
       }
-      inSocket.close();
-      outSocket.close();
+      if (inSocket) {
+        inSocket.close();
+      }
+      if (outSocket) {
+        outSocket.close();
+      }
     };
 
     try {
@@ -154,8 +158,8 @@ export class ConnectionHandler {
 
         // Parse packet header (3 bytes: type, length high, length low)
         if (packetLen === 0 && packet.length >= 3) {
-          packetType = packet[0];
-          packetLen = (packet[1] << 8) + packet[2];
+          packetType = packet[0] ?? PacketType.Laser;
+          packetLen = ((packet[1] ?? 0) << 8) + (packet[2] ?? 0);
           packet = packet.slice(3);
         }
 
@@ -230,7 +234,7 @@ export class ConnectionHandler {
 
             default:
               this.status.error(
-                `Unhandled packet type: 0x${packetType.toString(16)}`,
+                `Unhandled packet type: 0x${(packetType as number).toString(16)}`,
               );
           }
         }
