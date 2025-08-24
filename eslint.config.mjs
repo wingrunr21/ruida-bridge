@@ -3,6 +3,8 @@
 import js from '@eslint/js';
 import tseslint from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
+import prettier from 'eslint-plugin-prettier';
+import prettierConfig from 'eslint-config-prettier';
 
 export default [
   {
@@ -38,10 +40,15 @@ export default [
     },
     plugins: {
       '@typescript-eslint': tseslint,
+      prettier: prettier,
     },
     rules: {
       ...js.configs.recommended.rules,
       ...tseslint.configs.recommended.rules,
+      ...prettierConfig.rules,
+      
+      // Prettier rules
+      'prettier/prettier': 'error',
       
       // TypeScript specific rules
       '@typescript-eslint/no-unused-vars': ['error', { 'argsIgnorePattern': '^_' }],
@@ -49,7 +56,6 @@ export default [
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
       '@typescript-eslint/no-non-null-assertion': 'warn',
-      '@typescript-eslint/prefer-const': 'error',
       '@typescript-eslint/no-var-requires': 'off', // Allow require() for package.json
       
       // General code quality
@@ -60,12 +66,12 @@ export default [
       'eqeqeq': 'error',
       'curly': 'error',
       
-      // Style preferences
-      'semi': ['error', 'always'],
-      'quotes': ['error', 'single', { 'avoidEscape': true }],
-      'comma-dangle': ['error', 'never'],
-      'indent': ['error', 4, { 'SwitchCase': 1 }],
-      'max-len': ['warn', { 'code': 120 }],
+      // Style preferences (these will be overridden by prettier)
+      'semi': 'off', // Handled by prettier
+      'quotes': 'off', // Handled by prettier
+      'comma-dangle': 'off', // Handled by prettier
+      'indent': 'off', // Handled by prettier
+      'max-len': 'off', // Handled by prettier
       
       // Bun specific allowances
       'no-undef': 'off', // Bun globals are handled in languageOptions.globals

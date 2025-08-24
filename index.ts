@@ -3,6 +3,7 @@
 import { parseArgs } from "util";
 import { RuidaBridgeApp, type AppConfig } from "./src/app.ts";
 import { ConsoleStatus } from "./src/types.ts";
+import packageJson from "./package.json";
 
 function showHelp(): void {
   console.log(`
@@ -33,8 +34,7 @@ Examples:
 }
 
 function showVersion(): void {
-  const pkg = require("./package.json");
-  console.log(`Ruida Bridge v${pkg.version}`);
+  console.log(`Ruida Bridge v${packageJson.version}`);
 }
 
 async function main(): Promise<void> {
@@ -74,7 +74,9 @@ async function main(): Promise<void> {
   let isShuttingDown = false;
 
   const shutdown = async () => {
-    if (isShuttingDown) return;
+    if (isShuttingDown) {
+      return;
+    }
     isShuttingDown = true;
 
     status.info("Shutdown signal received");
