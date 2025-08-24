@@ -1,0 +1,14 @@
+---
+description: overarching project goals and rules
+alwaysApply: true
+---
+
+# Goals
+
+This project intends to build a TypeScript relay server that allows proxying the Ruida protocol for a Ruida based laser to client software such as Lightburn
+
+The project should consist of the socket relay server along with a `/status` endpoint.
+
+Both the relay and the HTTP server should start up via @index.ts
+
+Logging should follow best practices, with differentiated log levels

@@ -1,0 +1,38 @@
+{
+  "name": "ruida-bridge",
+  "version": "1.0.0",
+  "description": "High-performance TCP-to-UDP relay bridge for Ruida laser controllers using Bun runtime",
+  "main": "index.ts",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run index.ts",
+    "dev": "bun --watch index.ts",
+    "build": "bun build index.ts --outdir ./dist",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "bun run tsc --noEmit",
+    "docker:build": "docker build -f docker/Dockerfile -t ruida-bridge .",
+    "docker:run": "docker run -p 5005:5005 --env-file .env ruida-bridge"
+  },
+  "keywords": ["ruida", "laser", "bridge", "relay", "bun", "tcp", "udp"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.57.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
+  }
+}
