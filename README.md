@@ -1,6 +1,6 @@
 # Ruida Bridge
 
-A high-performance TCP-to-UDP relay bridge for Ruida laser controllers, built with [Bun](https://bun.com) for optimal performance and low latency.
+A high-performance TCP-to-UDP relay bridge for Ruida laser controllers.
 
 ## Overview
 

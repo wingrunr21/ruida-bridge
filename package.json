@@ -1,7 +1,7 @@
 {
   "name": "ruida-bridge",
   "version": "1.0.0",
-  "description": "High-performance TCP-to-UDP relay bridge for Ruida laser controllers using Bun runtime",
+  "description": "High-performance TCP-to-UDP relay bridge for Ruida laser controllers",
   "main": "index.ts",
   "module": "index.ts",
   "type": "module",

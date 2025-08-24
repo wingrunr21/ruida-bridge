@@ -38,6 +38,11 @@ COPY --from=prerelease /usr/src/app/tsconfig.json .
 # Install curl for healthchecks (Alpine uses apk)
 RUN apk add --no-cache curl
 
+# Add container labels for GitHub Container Registry
+LABEL org.opencontainers.image.source=https://github.com/wingrunr21/ruida-bridge
+LABEL org.opencontainers.image.description="High-performance TCP-to-UDP relay bridge for Ruida laser controllers"
+LABEL org.opencontainers.image.licenses=MIT
+
 # run the app
 USER bun
 # TCP port for client connections
