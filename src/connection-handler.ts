@@ -217,15 +217,18 @@ export class ConnectionHandler {
                     MAX_UDP_SIZE,
                     udpPacket.length - offset,
                   );
-                  const fragment = udpPacket.subarray(offset, offset + chunkSize);
-                  
+                  const fragment = udpPacket.subarray(
+                    offset,
+                    offset + chunkSize,
+                  );
+
                   outSocket.send(
                     fragment,
                     this.config.toLaserPort,
                     this.config.laserIp,
                   );
                   offset += chunkSize;
-                  
+
                   // Protocol requires waiting for ACK between fragments
                   // For now, send immediately - laser should handle buffering
                 }
