@@ -58,6 +58,7 @@ export class ConnectionHandler {
     }
 
     const outSocket = await Bun.udpSocket(outSocketOptions);
+    console.debug(`Created outgoing UDP socket${this.config.bridgeHost ? ` bound to ${this.config.bridgeHost}` : ''}`);
 
     // Create UDP socket for incoming (from laser)
     let gotAck = true;
@@ -70,6 +71,8 @@ export class ConnectionHandler {
       socket: {
         data(inSock: any, buf: any, _port: any, _addr: any) {
           const data = Buffer.from(buf);
+          console.debug(`Received UDP response: ${data.length} bytes from laser`);
+          console.debug(`Response data: ${data.toString('hex')}`);
 
           // Single byte responses are ACKs
           if (data.length === 1) {
@@ -141,6 +144,8 @@ export class ConnectionHandler {
     }
 
     const inSocket = await Bun.udpSocket(socketOptions);
+    console.debug(`Created incoming UDP socket on port ${this.config.fromLaserPort}${this.config.bridgeHost ? ` bound to ${this.config.bridgeHost}` : ''}`);
+    console.debug(`Bridge will send packets to laser at ${this.config.laserIp}:${this.config.toLaserPort}`);
 
     // Connection state
     let packet = Buffer.alloc(0);
@@ -203,6 +208,8 @@ export class ConnectionHandler {
               const MAX_UDP_SIZE = RUIDA_PROTOCOL.MAX_UDP_SIZE;
               if (udpPacket.length <= MAX_UDP_SIZE) {
                 // Send as single packet
+                console.debug(`Sending UDP packet: ${udpPacket.length} bytes to ${this.config.laserIp}:${this.config.toLaserPort}`);
+                console.debug(`Packet data: ${udpPacket.toString('hex')}`);
                 outSocket.send(
                   udpPacket,
                   this.config.toLaserPort,
@@ -211,7 +218,9 @@ export class ConnectionHandler {
               } else {
                 // Protocol spec: "fragmented by simple cutting (even inside a command)"
                 // Simple cutting = split the complete packet (checksum + data) without modification
+                console.debug(`Fragmenting large packet: ${udpPacket.length} bytes into ${Math.ceil(udpPacket.length / MAX_UDP_SIZE)} fragments`);
                 let offset = 0;
+                let fragmentIndex = 0;
                 while (offset < udpPacket.length) {
                   const chunkSize = Math.min(
                     MAX_UDP_SIZE,
@@ -222,12 +231,15 @@ export class ConnectionHandler {
                     offset + chunkSize,
                   );
 
+                  console.debug(`Sending fragment ${fragmentIndex + 1}: ${fragment.length} bytes to ${this.config.laserIp}:${this.config.toLaserPort}`);
+                  console.debug(`Fragment data: ${fragment.toString('hex')}`);
                   outSocket.send(
                     fragment,
                     this.config.toLaserPort,
                     this.config.laserIp,
                   );
                   offset += chunkSize;
+                  fragmentIndex++;
 
                   // Protocol requires waiting for ACK between fragments
                   // For now, send immediately - laser should handle buffering
