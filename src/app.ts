@@ -20,7 +20,7 @@ export class RuidaBridgeApp extends EventEmitter {
   private udpRelay: UdpRelay;
   private version: [number, number] = [1, 0];
 
-  constructor(config: AppConfig, status: Status) {
+  constructor(config: AppConfig, status: Status, udpRelay?: UdpRelay) {
     super();
     this.config = config;
     this.status = status;
@@ -39,7 +39,7 @@ export class RuidaBridgeApp extends EventEmitter {
       ...(config.bridge_host && { bridgeHost: config.bridge_host }),
     };
 
-    this.udpRelay = new UdpRelay(connectionConfig, status);
+    this.udpRelay = udpRelay || new UdpRelay(connectionConfig, status);
     this.tcpServer = new TcpServer(
       serverConfig,
       connectionConfig,

@@ -1,12 +1,14 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { RuidaBridgeApp, type AppConfig } from "../src/app.ts";
 import { ConsoleStatus } from "../src/types.ts";
 import { PacketType } from "../src/connection-handler.ts";
+import type { UdpRelay } from "../src/udp-relay.ts";
 
 describe("Ruida Bridge Integration Tests", () => {
   let app: RuidaBridgeApp;
   let config: AppConfig;
   let status: ConsoleStatus;
+  let mockUdpRelay: UdpRelay;
 
   beforeEach(() => {
     config = {
@@ -18,7 +20,14 @@ describe("Ruida Bridge Integration Tests", () => {
     // Status server will use Bun's default PORT (3000)
 
     status = new ConsoleStatus();
-    app = new RuidaBridgeApp(config, status);
+    mockUdpRelay = {
+      start: mock(() => Promise.resolve()),
+      stop: mock(() => {}),
+      registerCallback: mock(() => {}),
+      unregisterCallback: mock(() => {}),
+      sendToLaser: mock(() => {}),
+    } as unknown as UdpRelay;
+    app = new RuidaBridgeApp(config, status, mockUdpRelay);
   });
 
   afterEach(async () => {
@@ -54,8 +63,22 @@ describe("Ruida Bridge Integration Tests", () => {
 
     test("should handle startup errors gracefully", async () => {
       // Try to start two instances on same port (should cause conflict)
-      const app1 = new RuidaBridgeApp(config, status);
-      const app2 = new RuidaBridgeApp(config, status);
+      const mockUdpRelay1 = {
+        start: mock(() => Promise.resolve()),
+        stop: mock(() => {}),
+        registerCallback: mock(() => {}),
+        unregisterCallback: mock(() => {}),
+        sendToLaser: mock(() => {}),
+      } as unknown as UdpRelay;
+      const mockUdpRelay2 = {
+        start: mock(() => Promise.resolve()),
+        stop: mock(() => {}),
+        registerCallback: mock(() => {}),
+        unregisterCallback: mock(() => {}),
+        sendToLaser: mock(() => {}),
+      } as unknown as UdpRelay;
+      const app1 = new RuidaBridgeApp(config, status, mockUdpRelay1);
+      const app2 = new RuidaBridgeApp(config, status, mockUdpRelay2);
 
       await app1.start();
 
@@ -261,7 +284,18 @@ describe("Ruida Bridge Integration Tests", () => {
       };
 
       // Should not throw on construction
-      const invalidApp = new RuidaBridgeApp(invalidConfig, status);
+      const mockInvalidUdpRelay = {
+        start: mock(() => Promise.resolve()),
+        stop: mock(() => {}),
+        registerCallback: mock(() => {}),
+        unregisterCallback: mock(() => {}),
+        sendToLaser: mock(() => {}),
+      } as unknown as UdpRelay;
+      const invalidApp = new RuidaBridgeApp(
+        invalidConfig,
+        status,
+        mockInvalidUdpRelay,
+      );
       expect(invalidApp).toBeDefined();
 
       // Cleanup
@@ -277,7 +311,18 @@ describe("Ruida Bridge Integration Tests", () => {
       };
 
       // Should not throw on construction with bridge_host
-      const bridgeHostApp = new RuidaBridgeApp(configWithBridgeHost, status);
+      const mockBridgeHostUdpRelay = {
+        start: mock(() => Promise.resolve()),
+        stop: mock(() => {}),
+        registerCallback: mock(() => {}),
+        unregisterCallback: mock(() => {}),
+        sendToLaser: mock(() => {}),
+      } as unknown as UdpRelay;
+      const bridgeHostApp = new RuidaBridgeApp(
+        configWithBridgeHost,
+        status,
+        mockBridgeHostUdpRelay,
+      );
       expect(bridgeHostApp).toBeDefined();
 
       // Cleanup
@@ -292,7 +337,18 @@ describe("Ruida Bridge Integration Tests", () => {
         server_ip: "127.0.0.1",
       };
 
-      const unreachableApp = new RuidaBridgeApp(unreachableConfig, status);
+      const mockUnreachableUdpRelay = {
+        start: mock(() => Promise.resolve()),
+        stop: mock(() => {}),
+        registerCallback: mock(() => {}),
+        unregisterCallback: mock(() => {}),
+        sendToLaser: mock(() => {}),
+      } as unknown as UdpRelay;
+      const unreachableApp = new RuidaBridgeApp(
+        unreachableConfig,
+        status,
+        mockUnreachableUdpRelay,
+      );
 
       // Should start even if laser is unreachable
       await unreachableApp.start();

@@ -1,7 +1,7 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { TcpServer, type ServerConfig } from "../src/tcp-server.ts";
 import type { ConnectionConfig } from "../src/connection-handler.ts";
-import { UdpRelay } from "../src/udp-relay.ts";
+import type { UdpRelay } from "../src/udp-relay.ts";
 import type { Status } from "../src/types.ts";
 
 describe("TcpServer", () => {
@@ -32,7 +32,13 @@ describe("TcpServer", () => {
       version: [1, 0],
     };
 
-    mockUdpRelay = new UdpRelay(connectionConfig, mockStatus);
+    mockUdpRelay = {
+      start: mock(() => Promise.resolve()),
+      stop: mock(() => {}),
+      registerCallback: mock(() => {}),
+      unregisterCallback: mock(() => {}),
+      sendToLaser: mock(() => {}),
+    } as unknown as UdpRelay;
     server = new TcpServer(
       serverConfig,
       connectionConfig,
