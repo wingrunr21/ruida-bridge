@@ -268,6 +268,22 @@ describe("Ruida Bridge Integration Tests", () => {
       invalidApp.stop();
     });
 
+    test("should handle bridge_host configuration", () => {
+      const configWithBridgeHost: AppConfig = {
+        laser_ip: "127.0.0.1",
+        server_port: 15007,
+        server_ip: "127.0.0.1",
+        bridge_host: "10.0.3.1",
+      };
+
+      // Should not throw on construction with bridge_host
+      const bridgeHostApp = new RuidaBridgeApp(configWithBridgeHost, status);
+      expect(bridgeHostApp).toBeDefined();
+
+      // Cleanup
+      bridgeHostApp.stop();
+    });
+
     test("should handle network errors gracefully", async () => {
       // Test with unreachable laser IP
       const unreachableConfig: AppConfig = {

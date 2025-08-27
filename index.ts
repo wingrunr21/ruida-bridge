@@ -23,6 +23,7 @@ Options:
 Environment Variables:
   LASER_IP               Laser controller IP Address. Needs to match the controller configuration.
   BRIDGE_PORT            TCP bridge port to listen on. Lightburn Bridge requires port 5005.
+  BRIDGE_HOST            Hostname/IP to bind UDP sockets to (defaults to 10.0.3.1).
   HOST                   Host to bind servers to (Bun native).
   PORT                   Status server port (Bun native, defaults to 3000).
 
@@ -65,6 +66,7 @@ async function main(): Promise<void> {
     laser_ip: args["laser-ip"] || Bun.env.LASER_IP || "10.0.3.3",
     server_port: parseInt(args["bridge-port"] || Bun.env.BRIDGE_PORT || "5005"),
     server_ip: Bun.env.HOST || "0.0.0.0", // Fallback for TCP server only
+    bridge_host: Bun.env.BRIDGE_HOST || "10.0.3.1",
   };
 
   const status = new ConsoleStatus();

@@ -1,25 +1,20 @@
-version: '3.8'
-
 services:
   ruida-bridge:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: ghcr.io/wingrunr21/ruida-bridge:latest
     container_name: ruida-bridge
     ports:
-      - "5005:5005/tcp"    # TCP server port for client connections
-      - "40200:40200/udp"  # UDP port for receiving from laser
-      - "50200:50200/udp"  # UDP port for sending to laser
-      - "3000:3000/tcp"    # Status/health endpoint
+      - "5005:5005/tcp" # TCP server port for client connections
+      - "40200:40200/udp" # UDP port for receiving from laser
+      - "50200:50200/udp" # UDP port for sending to laser
+      - "3000:3000/tcp" # Status/health endpoint
     environment:
       - LASER_IP=10.0.3.3
       - BRIDGE_PORT=5005
+      - BRIDGE_HOST=10.0.3.1
       - HOST=0.0.0.0
       - PORT=3000
       - NODE_ENV=production
       - LOG_LEVEL=info
-    volumes:
-      - ./config:/usr/src/app/config:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/status"]
       interval: 30s
@@ -32,9 +27,9 @@ services:
     image: alexxit/go2rtc:latest
     container_name: go2rtc
     ports:
-      - "1984:1984/tcp"    # Web interface
-      - "8554:8554/tcp"    # RTSP server
-      - "8555:8555/tcp"    # WebRTC
+      - "1984:1984/tcp" # Web interface
+      - "8554:8554/tcp" # RTSP server
+      - "8555:8555/tcp" # WebRTC
     volumes:
       - ./config/go2rtc.yaml:/config/go2rtc.yaml:ro
       - go2rtc_data:/data

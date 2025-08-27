@@ -24,6 +24,7 @@ export interface ConnectionConfig {
   fromLaserPort: number;
   toLaserPort: number;
   version: [number, number];
+  bridgeHost?: string;
 }
 
 export class ConnectionHandler {
@@ -57,10 +58,10 @@ export class ConnectionHandler {
     let lastLen = 0;
     let packetType = PacketType.Laser;
 
-    const inSocket = await Bun.udpSocket({
+    const socketOptions: any = {
       port: this.config.fromLaserPort,
       socket: {
-        data(inSock, buf, _port, _addr) {
+        data(inSock: any, buf: any, _port: any, _addr: any) {
           const data = Buffer.from(buf);
 
           // Single byte responses are ACKs
@@ -122,11 +123,17 @@ export class ConnectionHandler {
             }
           }
         },
-        error(socket, error) {
+        error(socket: any, error: any) {
           console.error("UDP in socket error:", error);
         },
       },
-    });
+    };
+
+    if (this.config.bridgeHost) {
+      socketOptions.hostname = this.config.bridgeHost;
+    }
+
+    const inSocket = await Bun.udpSocket(socketOptions);
 
     // Connection state
     let packet = Buffer.alloc(0);

@@ -39,6 +39,18 @@ describe("ConnectionHandler", () => {
       // Response port is typically 40200 (common pattern)
       expect(config.fromLaserPort).toBe(40200);
     });
+
+    test("should support optional bridgeHost configuration", () => {
+      const configWithBridgeHost: ConnectionConfig = {
+        ...config,
+        bridgeHost: "10.0.3.1",
+      };
+
+      expect(configWithBridgeHost.bridgeHost).toBe("10.0.3.1");
+
+      // Config without bridgeHost should not have the property
+      expect(config.bridgeHost).toBeUndefined();
+    });
   });
 
   describe("TCP Packet Processing", () => {

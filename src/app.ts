@@ -8,6 +8,7 @@ export interface AppConfig {
   laser_ip: string;
   server_port: number;
   server_ip: string;
+  bridge_host?: string;
 }
 
 export class RuidaBridgeApp extends EventEmitter {
@@ -33,6 +34,7 @@ export class RuidaBridgeApp extends EventEmitter {
       fromLaserPort: 40200,
       toLaserPort: 50200,
       version: this.version,
+      ...(config.bridge_host && { bridgeHost: config.bridge_host }),
     };
 
     this.tcpServer = new TcpServer(serverConfig, connectionConfig, status);

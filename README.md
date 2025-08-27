@@ -44,7 +44,7 @@ bun start --bridge-port 5006 --laser-ip 10.0.1.100
 
 **Using environment variables:**
 ```bash
-LASER_IP=10.0.3.3 BRIDGE_PORT=5005 bun start
+LASER_IP=10.0.3.3 BRIDGE_PORT=5005 BRIDGE_HOST=10.0.3.1 bun start
 ```
 
 ## Configuration
@@ -60,6 +60,7 @@ LASER_IP=10.0.3.3 BRIDGE_PORT=5005 bun start
 
 - `LASER_IP`: Default laser controller IP address
 - `BRIDGE_PORT`: Default TCP bridge port
+- `BRIDGE_HOST`: Hostname/IP to bind UDP sockets to (defaults to 10.0.3.1)
 - `PORT`: Status server port (Bun native, defaults to 3000)
 - `HOST`: Host to bind servers to (Bun native)
 
