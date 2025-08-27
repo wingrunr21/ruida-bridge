@@ -15,6 +15,7 @@ describe("ConnectionHandler", () => {
       info: mock(() => {}),
       warn: mock(() => {}),
       error: mock(() => {}),
+      debug: mock(() => {}),
     };
 
     config = {

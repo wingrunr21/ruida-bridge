@@ -23,7 +23,7 @@ export class UdpRelay {
     if (this.isStarted) {
       return;
     }
-
+    const logger = this.status;
     try {
       // Create UDP socket for outgoing (to laser)
       const outSocketOptions: any = {
@@ -32,7 +32,7 @@ export class UdpRelay {
             // Not used for outgoing socket
           },
           error(socket: any, error: any) {
-            console.error("UDP out socket error:", error);
+            logger.error(`UDP out socket error: ${error}`);
           },
         },
       };
@@ -42,7 +42,7 @@ export class UdpRelay {
       }
 
       this.outSocket = await Bun.udpSocket(outSocketOptions);
-      console.debug(
+      this.status.debug(
         `Created outgoing UDP socket${this.config.bridgeHost ? ` bound to ${this.config.bridgeHost}` : ""}`,
       );
 
@@ -52,10 +52,10 @@ export class UdpRelay {
         socket: {
           data: (inSock: any, buf: any, _port: any, _addr: any) => {
             const data = Buffer.from(buf);
-            console.debug(
+            this.status.debug(
               `Received UDP response: ${data.length} bytes from laser`,
             );
-            console.debug(`Response data: ${data.toString("hex")}`);
+            this.status.debug(`Response data: ${data.toString("hex")}`);
 
             // Forward to all registered callbacks
             this.callbacks.forEach((callback) => {
@@ -63,7 +63,7 @@ export class UdpRelay {
             });
           },
           error: (socket: any, error: any) => {
-            console.error("UDP in socket error:", error);
+            this.status.error(`UDP in socket error: ${error}`);
           },
         },
       };
@@ -73,10 +73,10 @@ export class UdpRelay {
       }
 
       this.inSocket = await Bun.udpSocket(socketOptions);
-      console.debug(
+      this.status.debug(
         `Created incoming UDP socket on port ${this.config.fromLaserPort}${this.config.bridgeHost ? ` bound to ${this.config.bridgeHost}` : ""}`,
       );
-      console.debug(
+      this.status.debug(
         `Bridge will send packets to laser at ${this.config.laserIp}:${this.config.toLaserPort}`,
       );
 
@@ -121,7 +121,7 @@ export class UdpRelay {
 
   sendToLaser(packetData: Buffer): void {
     if (!this.isStarted || !this.outSocket) {
-      console.error("UDP relay not started, cannot send packet");
+      this.status.error("UDP relay not started, cannot send packet");
       return;
     }
 
@@ -143,10 +143,10 @@ export class UdpRelay {
     const MAX_UDP_SIZE = RUIDA_PROTOCOL.MAX_UDP_SIZE;
     if (udpPacket.length <= MAX_UDP_SIZE) {
       // Send as single packet
-      console.debug(
+      this.status.debug(
         `Sending UDP packet: ${udpPacket.length} bytes to ${this.config.laserIp}:${this.config.toLaserPort}`,
       );
-      console.debug(`Packet data: ${udpPacket.toString("hex")}`);
+      this.status.debug(`Packet data: ${udpPacket.toString("hex")}`);
       this.outSocket.send(
         udpPacket,
         this.config.toLaserPort,
@@ -155,7 +155,7 @@ export class UdpRelay {
     } else {
       // Protocol spec: "fragmented by simple cutting (even inside a command)"
       // Simple cutting = split the complete packet (checksum + data) without modification
-      console.debug(
+      this.status.debug(
         `Fragmenting large packet: ${udpPacket.length} bytes into ${Math.ceil(udpPacket.length / MAX_UDP_SIZE)} fragments`,
       );
       let offset = 0;
@@ -164,10 +164,10 @@ export class UdpRelay {
         const chunkSize = Math.min(MAX_UDP_SIZE, udpPacket.length - offset);
         const fragment = udpPacket.subarray(offset, offset + chunkSize);
 
-        console.debug(
+        this.status.debug(
           `Sending fragment ${fragmentIndex + 1}: ${fragment.length} bytes to ${this.config.laserIp}:${this.config.toLaserPort}`,
         );
-        console.debug(`Fragment data: ${fragment.toString("hex")}`);
+        this.status.debug(`Fragment data: ${fragment.toString("hex")}`);
         this.outSocket.send(
           fragment,
           this.config.toLaserPort,

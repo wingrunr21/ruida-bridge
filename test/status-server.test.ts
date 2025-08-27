@@ -13,6 +13,7 @@ describe("StatusServer", () => {
       info: mock(() => {}),
       warn: mock(() => {}),
       error: mock(() => {}),
+      debug: mock(() => {}),
     };
 
     mockStatusData = {

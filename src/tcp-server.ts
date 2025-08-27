@@ -45,6 +45,9 @@ export class TcpServer extends EventEmitter {
       socket: {
         open: (socket) => {
           this.handleNewConnection(socket);
+          this.status.debug(
+            `New connection from ${socket.remoteAddress}:${socket.remotePort}`,
+          );
         },
         data: (_socket, _data) => {
           // Handled per-socket in ConnectionHandler
@@ -53,7 +56,7 @@ export class TcpServer extends EventEmitter {
           // Handled per-socket in ConnectionHandler
         },
         close: (_socket) => {
-          // Handled per-socket in ConnectionHandler
+          this.status.debug("Server socket closed");
         },
         error: (socket, error) => {
           this.status.error(`Server socket error: ${error.message}`);

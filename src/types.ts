@@ -5,6 +5,7 @@ export interface Status {
   info(message: string): void;
   warn(message: string): void;
   error(message: string): void;
+  debug(message: string): void;
 }
 
 export class ConsoleStatus implements Status {
@@ -22,5 +23,9 @@ export class ConsoleStatus implements Status {
 
   error(message: string): void {
     console.error(`[ERROR] ${message}`);
+  }
+
+  debug(message: string): void {
+    console.debug(`[DEBUG] ${message}`);
   }
 }

@@ -17,6 +17,7 @@ describe("TcpServer", () => {
       info: mock(() => {}),
       warn: mock(() => {}),
       error: mock(() => {}),
+      debug: mock(() => {}),
     };
 
     serverConfig = {
