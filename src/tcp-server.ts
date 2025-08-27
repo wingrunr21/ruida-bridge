@@ -3,6 +3,7 @@ import {
   ConnectionHandler,
   type ConnectionConfig,
 } from "./connection-handler.ts";
+import type { UdpRelay } from "./udp-relay.ts";
 import type { Status } from "./types.ts";
 
 export interface ServerConfig {
@@ -24,12 +25,17 @@ export class TcpServer extends EventEmitter {
     config: ServerConfig,
     connectionConfig: ConnectionConfig,
     status: Status,
+    udpRelay: UdpRelay,
   ) {
     super();
     this.config = config;
     this.connectionConfig = connectionConfig;
     this.status = status;
-    this.connectionHandler = new ConnectionHandler(connectionConfig, status);
+    this.connectionHandler = new ConnectionHandler(
+      connectionConfig,
+      status,
+      udpRelay,
+    );
   }
 
   start(): void {

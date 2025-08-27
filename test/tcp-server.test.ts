@@ -1,12 +1,14 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { TcpServer, type ServerConfig } from "../src/tcp-server.ts";
 import type { ConnectionConfig } from "../src/connection-handler.ts";
+import { UdpRelay } from "../src/udp-relay.ts";
 import type { Status } from "../src/types.ts";
 
 describe("TcpServer", () => {
   let mockStatus: Status;
   let serverConfig: ServerConfig;
   let connectionConfig: ConnectionConfig;
+  let mockUdpRelay: UdpRelay;
   let server: TcpServer;
 
   beforeEach(() => {
@@ -29,7 +31,13 @@ describe("TcpServer", () => {
       version: [1, 0],
     };
 
-    server = new TcpServer(serverConfig, connectionConfig, mockStatus);
+    mockUdpRelay = new UdpRelay(connectionConfig, mockStatus);
+    server = new TcpServer(
+      serverConfig,
+      connectionConfig,
+      mockStatus,
+      mockUdpRelay,
+    );
   });
 
   afterEach(() => {

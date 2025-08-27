@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import { TcpServer, type ServerConfig } from "./tcp-server.ts";
 import { StatusServer, type StatusData } from "./status-server.ts";
 import type { ConnectionConfig } from "./connection-handler.ts";
+import { UdpRelay } from "./udp-relay.ts";
 import type { Status } from "./types.ts";
 
 export interface AppConfig {
@@ -16,6 +17,7 @@ export class RuidaBridgeApp extends EventEmitter {
   private status: Status;
   private tcpServer: TcpServer;
   private statusServer: StatusServer;
+  private udpRelay: UdpRelay;
   private version: [number, number] = [1, 0];
 
   constructor(config: AppConfig, status: Status) {
@@ -37,7 +39,13 @@ export class RuidaBridgeApp extends EventEmitter {
       ...(config.bridge_host && { bridgeHost: config.bridge_host }),
     };
 
-    this.tcpServer = new TcpServer(serverConfig, connectionConfig, status);
+    this.udpRelay = new UdpRelay(connectionConfig, status);
+    this.tcpServer = new TcpServer(
+      serverConfig,
+      connectionConfig,
+      status,
+      this.udpRelay,
+    );
     this.statusServer = new StatusServer(status);
 
     // Handle shutdown signals
@@ -46,24 +54,20 @@ export class RuidaBridgeApp extends EventEmitter {
   }
 
   async start(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        // Start status server
-        this.statusServer.start(() => this.getStatusData());
+    // Start UDP relay first
+    await this.udpRelay.start();
 
-        // Start TCP server
-        this.tcpServer.start();
+    // Start status server
+    this.statusServer.start(() => this.getStatusData());
 
-        this.status.ok(`Ruida Bridge started`);
-        this.status.info(`Laser IP: ${this.config.laser_ip}`);
-        this.status.info(`Server Port: ${this.config.server_port}`);
+    // Start TCP server
+    this.tcpServer.start();
 
-        this.emit("started");
-        resolve();
-      } catch (error) {
-        reject(error);
-      }
-    });
+    this.status.ok(`Ruida Bridge started`);
+    this.status.info(`Laser IP: ${this.config.laser_ip}`);
+    this.status.info(`Server Port: ${this.config.server_port}`);
+
+    this.emit("started");
   }
 
   stop(): void {
@@ -75,6 +79,9 @@ export class RuidaBridgeApp extends EventEmitter {
     }
     if (this.statusServer) {
       this.statusServer.stop();
+    }
+    if (this.udpRelay) {
+      this.udpRelay.stop();
     }
 
     this.status.info("Ruida Bridge stopped");

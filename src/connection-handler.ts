@@ -1,3 +1,4 @@
+import type { UdpRelay, UdpRelayCallbacks } from "./udp-relay.ts";
 import type { Status } from "./types.ts";
 
 export enum PacketType {
@@ -30,151 +31,47 @@ export interface ConnectionConfig {
 export class ConnectionHandler {
   private config: ConnectionConfig;
   private status: Status;
+  private udpRelay: UdpRelay;
 
-  constructor(config: ConnectionConfig, status: Status) {
+  constructor(config: ConnectionConfig, status: Status, udpRelay: UdpRelay) {
     this.config = config;
     this.status = status;
+    this.udpRelay = udpRelay;
   }
 
   async handleConnection(socket: any): Promise<void> {
     const clientAddr = `${socket.remoteAddress}`;
     this.status.ok(`Connection from: ${clientAddr}`);
 
-    // Create UDP socket for outgoing (to laser)
-    // Use ephemeral port for outgoing - the important part is the destination
-    const outSocketOptions: any = {
-      socket: {
-        data(_socket: any, _buf: any, _port: any, _addr: any) {
-          // Not used for outgoing socket
-        },
-        error(socket: any, error: any) {
-          console.error("UDP out socket error:", error);
-        },
-      },
-    };
-
-    if (this.config.bridgeHost) {
-      outSocketOptions.hostname = this.config.bridgeHost;
-    }
-
-    const outSocket = await Bun.udpSocket(outSocketOptions);
-    console.debug(
-      `Created outgoing UDP socket${this.config.bridgeHost ? ` bound to ${this.config.bridgeHost}` : ""}`,
-    );
-
-    // Create UDP socket for incoming (from laser)
-    let gotAck = true;
-    let ackValue = Buffer.alloc(0);
-    let lastLen = 0;
-    let packetType = PacketType.Laser;
-
-    const socketOptions: any = {
-      port: this.config.fromLaserPort,
-      socket: {
-        data(inSock: any, buf: any, _port: any, _addr: any) {
-          const data = Buffer.from(buf);
-          console.debug(
-            `Received UDP response: ${data.length} bytes from laser`,
-          );
-          console.debug(`Response data: ${data.toString("hex")}`);
-
-          // Single byte responses are ACKs
-          if (data.length === 1) {
-            if (ackValue.length === 0) {
-              ackValue = data;
-              gotAck = true;
-            } else if (ackValue[0] !== data[0]) {
-              gotAck = true;
-            }
-          } else if (data.length > 2) {
-            // Validate checksum for multi-byte responses
-            const receivedChecksum = ((data[0] ?? 0) << 8) | (data[1] ?? 0);
-            const payload = data.slice(2);
-
-            // Calculate expected checksum
-            let expectedChecksum = 0;
-            for (const byte of payload) {
-              expectedChecksum += byte;
-            }
-            expectedChecksum = expectedChecksum & 0xffff;
-
-            if (receivedChecksum !== expectedChecksum) {
-              // Checksum error - log but still forward (let client handle)
-              console.warn(
-                `UDP checksum mismatch: expected ${expectedChecksum}, got ${receivedChecksum}`,
-              );
-            }
-
-            // Forward payload (without checksum) to client via TCP
-            if (socket && !socket.closed) {
-              const header = Buffer.from([
-                PacketType.Laser, // UDP responses are laser data
-                (payload.length >> 8) & 0xff,
-                payload.length & 0xff,
-              ]);
-              try {
-                socket.write(Buffer.concat([header, payload]));
-              } catch {
-                // Connection might be closed
-              }
-            }
-          }
-
-          // Forward single-byte ACKs to client only if previous packet was small
-          // (filter out ACKs for large data transfers to avoid spam)
-          if (data.length === 1 && lastLen <= 500) {
-            if (socket && !socket.closed) {
-              const header = Buffer.from([
-                PacketType.Laser, // UDP ACKs are laser responses
-                (data.length >> 8) & 0xff,
-                data.length & 0xff,
-              ]);
-              try {
-                socket.write(Buffer.concat([header, data]));
-              } catch {
-                // Connection might be closed
-              }
-            }
-          }
-        },
-        error(socket: any, error: any) {
-          console.error("UDP in socket error:", error);
-        },
-      },
-    };
-
-    if (this.config.bridgeHost) {
-      socketOptions.hostname = this.config.bridgeHost;
-    }
-
-    const inSocket = await Bun.udpSocket(socketOptions);
-    console.debug(
-      `Created incoming UDP socket on port ${this.config.fromLaserPort}${this.config.bridgeHost ? ` bound to ${this.config.bridgeHost}` : ""}`,
-    );
-    console.debug(
-      `Bridge will send packets to laser at ${this.config.laserIp}:${this.config.toLaserPort}`,
-    );
-
-    // Connection state
+    // Connection state for TCP packet parsing
     let packet = Buffer.alloc(0);
     let packetLen = 0;
+    let packetType = PacketType.Laser;
+    let gotAck = true;
+    let lastLen = 0;
     let lastTime = Date.now();
     let timeoutCheckInterval: Timer | null = null;
+
+    // Create callback for UDP responses
+    const udpCallback: UdpRelayCallbacks = {
+      onLaserResponse: (data: Buffer) => {
+        // Forward UDP responses to TCP client
+        this.forwardUdpResponseToTcp(socket, data, lastLen);
+      },
+    };
+
+    // Register for UDP responses
+    this.udpRelay.registerCallback(udpCallback);
 
     const cleanup = () => {
       if (timeoutCheckInterval) {
         clearInterval(timeoutCheckInterval);
       }
-      if (inSocket) {
-        inSocket.close();
-      }
-      if (outSocket) {
-        outSocket.close();
-      }
+      this.udpRelay.unregisterCallback(udpCallback);
     };
 
     try {
-      // Set socket to handle data
+      // Set socket to handle data from TCP client
       socket.data = (socket: any, data: Uint8Array) => {
         if (!gotAck) {
           return;
@@ -198,67 +95,8 @@ export class ConnectionHandler {
 
           switch (packetType) {
             case PacketType.Laser: {
-              // Calculate checksum for UDP packet (sum of all bytes, MSB first)
-              let checksum = 0;
-              for (const byte of packetData) {
-                checksum += byte;
-              }
-              checksum = checksum & 0xffff; // Keep it 16-bit
-
-              // Create UDP packet with 2-byte checksum header
-              const checksumHeader = Buffer.from([
-                (checksum >> 8) & 0xff, // MSB first
-                checksum & 0xff,
-              ]);
-              const udpPacket = Buffer.concat([checksumHeader, packetData]);
-
-              // Enforce maximum UDP packet size
-              const MAX_UDP_SIZE = RUIDA_PROTOCOL.MAX_UDP_SIZE;
-              if (udpPacket.length <= MAX_UDP_SIZE) {
-                // Send as single packet
-                console.debug(
-                  `Sending UDP packet: ${udpPacket.length} bytes to ${this.config.laserIp}:${this.config.toLaserPort}`,
-                );
-                console.debug(`Packet data: ${udpPacket.toString("hex")}`);
-                outSocket.send(
-                  udpPacket,
-                  this.config.toLaserPort,
-                  this.config.laserIp,
-                );
-              } else {
-                // Protocol spec: "fragmented by simple cutting (even inside a command)"
-                // Simple cutting = split the complete packet (checksum + data) without modification
-                console.debug(
-                  `Fragmenting large packet: ${udpPacket.length} bytes into ${Math.ceil(udpPacket.length / MAX_UDP_SIZE)} fragments`,
-                );
-                let offset = 0;
-                let fragmentIndex = 0;
-                while (offset < udpPacket.length) {
-                  const chunkSize = Math.min(
-                    MAX_UDP_SIZE,
-                    udpPacket.length - offset,
-                  );
-                  const fragment = udpPacket.subarray(
-                    offset,
-                    offset + chunkSize,
-                  );
-
-                  console.debug(
-                    `Sending fragment ${fragmentIndex + 1}: ${fragment.length} bytes to ${this.config.laserIp}:${this.config.toLaserPort}`,
-                  );
-                  console.debug(`Fragment data: ${fragment.toString("hex")}`);
-                  outSocket.send(
-                    fragment,
-                    this.config.toLaserPort,
-                    this.config.laserIp,
-                  );
-                  offset += chunkSize;
-                  fragmentIndex++;
-
-                  // Protocol requires waiting for ACK between fragments
-                  // For now, send immediately - laser should handle buffering
-                }
-              }
+              // Send to laser via shared UDP relay
+              this.udpRelay.sendToLaser(packetData);
 
               lastLen = packetData.length;
               lastTime = Date.now();
@@ -267,7 +105,7 @@ export class ConnectionHandler {
             }
 
             case PacketType.Ping: {
-              // Respond with version
+              // Respond with version directly (no UDP needed)
               const response = Buffer.from([
                 PacketType.Ping,
                 0x00,
@@ -313,6 +151,64 @@ export class ConnectionHandler {
       cleanup();
       socket.end();
       throw error;
+    }
+  }
+
+  private forwardUdpResponseToTcp(
+    socket: any,
+    data: Buffer,
+    lastLen: number,
+  ): void {
+    // Single byte responses are ACKs
+    if (data.length === 1) {
+      // Forward single-byte ACKs to client only if previous packet was small
+      // (filter out ACKs for large data transfers to avoid spam)
+      if (lastLen <= 500) {
+        if (socket && !socket.closed) {
+          const header = Buffer.from([
+            PacketType.Laser, // UDP ACKs are laser responses
+            (data.length >> 8) & 0xff,
+            data.length & 0xff,
+          ]);
+          try {
+            socket.write(Buffer.concat([header, data]));
+          } catch {
+            // Connection might be closed
+          }
+        }
+      }
+    } else if (data.length > 2) {
+      // Validate checksum for multi-byte responses
+      const receivedChecksum = ((data[0] ?? 0) << 8) | (data[1] ?? 0);
+      const payload = data.slice(2);
+
+      // Calculate expected checksum
+      let expectedChecksum = 0;
+      for (const byte of payload) {
+        expectedChecksum += byte;
+      }
+      expectedChecksum = expectedChecksum & 0xffff;
+
+      if (receivedChecksum !== expectedChecksum) {
+        // Checksum error - log but still forward (let client handle)
+        console.warn(
+          `UDP checksum mismatch: expected ${expectedChecksum}, got ${receivedChecksum}`,
+        );
+      }
+
+      // Forward payload (without checksum) to client via TCP
+      if (socket && !socket.closed) {
+        const header = Buffer.from([
+          PacketType.Laser, // UDP responses are laser data
+          (payload.length >> 8) & 0xff,
+          payload.length & 0xff,
+        ]);
+        try {
+          socket.write(Buffer.concat([header, payload]));
+        } catch {
+          // Connection might be closed
+        }
+      }
     }
   }
 }
