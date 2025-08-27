@@ -55,8 +55,9 @@ export class TcpServer extends EventEmitter {
         drain: (_socket) => {
           // Handled per-socket in ConnectionHandler
         },
-        close: (_socket) => {
+        close: (socket) => {
           this.status.debug("Server socket closed");
+          this.handleSocketClosed(socket);
         },
         error: (socket, error) => {
           this.status.error(`Server socket error: ${error.message}`);
@@ -106,39 +107,14 @@ export class TcpServer extends EventEmitter {
     this.currentConnection = socket;
     this.isProcessingConnection = true;
 
-    // Set up proper cleanup when connection ends
-    const cleanup = () => {
-      if (this.currentConnection === socket) {
-        this.currentConnection = null;
-        this.isProcessingConnection = false;
-        this.processNextConnection();
-      }
-    };
-
-    // Handle socket close event properly
-    const originalSocketClose = socket.close;
-    socket.close = () => {
-      cleanup();
-      if (originalSocketClose) {
-        originalSocketClose();
-      }
-    };
-
-    // Also listen for socket errors to ensure cleanup
-    const originalSocketError = socket.error;
-    socket.error = (socket: any, error: Error) => {
-      this.status.error(`Socket error: ${error.message}`);
-      cleanup();
-      if (originalSocketError) {
-        originalSocketError(socket, error);
-      }
-    };
-
     try {
       await this.connectionHandler.handleConnection(socket);
     } catch (error) {
       this.status.error(`Failed to handle connection: ${error}`);
-      cleanup();
+      // Force cleanup on error - close the socket which will trigger handleSocketClosed
+      if (socket && !socket.closed) {
+        socket.end();
+      }
     }
   }
 
@@ -156,6 +132,24 @@ export class TcpServer extends EventEmitter {
         // Try next connection (recursive cleanup)
         this.processNextConnection();
       }
+    }
+  }
+
+  private handleSocketClosed(socket: any): void {
+    // Remove from queue if present
+    const queueIndex = this.connectionQueue.indexOf(socket);
+    if (queueIndex !== -1) {
+      this.connectionQueue.splice(queueIndex, 1);
+      this.status.debug(
+        `Removed closed socket from queue, ${this.connectionQueue.length} remaining`,
+      );
+    }
+
+    // Handle if this was the current connection
+    if (this.currentConnection === socket) {
+      this.currentConnection = null;
+      this.isProcessingConnection = false;
+      this.processNextConnection();
     }
   }
 
