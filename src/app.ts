@@ -20,7 +20,12 @@ export class RuidaBridgeApp extends EventEmitter {
   private udpRelay: UdpRelay;
   private version: [number, number] = [1, 0];
 
-  constructor(config: AppConfig, status: Status, udpRelay?: UdpRelay) {
+  constructor(
+    config: AppConfig,
+    status: Status,
+    udpRelay?: UdpRelay,
+    statusServer?: StatusServer,
+  ) {
     super();
     this.config = config;
     this.status = status;
@@ -46,7 +51,7 @@ export class RuidaBridgeApp extends EventEmitter {
       status,
       this.udpRelay,
     );
-    this.statusServer = new StatusServer(status);
+    this.statusServer = statusServer || new StatusServer(status);
 
     // Handle shutdown signals
     process.on("SIGINT", () => this.stop());
