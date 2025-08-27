@@ -4,23 +4,25 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src/**'
-      - 'index.ts'
-      - 'package.json'
-      - 'bun.lockb'
-      - 'tsconfig.json'
-      - '.github/workflows/main.yml'
-      - 'docker/**'
+      - "src/**"
+      - "test/**"
+      - "index.ts"
+      - "package.json"
+      - "bun.lockb"
+      - "tsconfig.json"
+      - ".github/workflows/main.yml"
+      - "docker/**"
   pull_request:
     branches: [main]
     paths:
-      - 'src/**'
-      - 'index.ts'
-      - 'package.json'
-      - 'bun.lockb'
-      - 'tsconfig.json'
-      - '.github/workflows/main.yml'
-      - 'docker/**'
+      - "src/**"
+      - "test/**"
+      - "index.ts"
+      - "package.json"
+      - "bun.lockb"
+      - "tsconfig.json"
+      - ".github/workflows/main.yml"
+      - "docker/**"
 
 env:
   REGISTRY: ghcr.io
