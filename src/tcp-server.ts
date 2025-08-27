@@ -103,40 +103,65 @@ export class TcpServer extends EventEmitter {
     this.currentConnection = socket;
     this.isProcessingConnection = true;
 
-    // Override the socket's close handler to process next connection
-    const originalClose = socket.close;
-    socket.close = () => {
-      if (originalClose) {
-        originalClose();
+    // Set up proper cleanup when connection ends
+    const cleanup = () => {
+      if (this.currentConnection === socket) {
+        this.currentConnection = null;
+        this.isProcessingConnection = false;
+        this.processNextConnection();
       }
-      this.currentConnection = null;
-      this.isProcessingConnection = false;
-      this.processNextConnection();
+    };
+
+    // Handle socket close event properly
+    const originalSocketClose = socket.close;
+    socket.close = () => {
+      cleanup();
+      if (originalSocketClose) {
+        originalSocketClose();
+      }
+    };
+
+    // Also listen for socket errors to ensure cleanup
+    const originalSocketError = socket.error;
+    socket.error = (socket: any, error: Error) => {
+      this.status.error(`Socket error: ${error.message}`);
+      cleanup();
+      if (originalSocketError) {
+        originalSocketError(socket, error);
+      }
     };
 
     try {
       await this.connectionHandler.handleConnection(socket);
     } catch (error) {
       this.status.error(`Failed to handle connection: ${error}`);
-      this.currentConnection = null;
-      this.isProcessingConnection = false;
-      this.processNextConnection();
+      cleanup();
     }
   }
 
   private processNextConnection(): void {
+    // Clean up any closed sockets from the queue first
+    this.connectionQueue = this.connectionQueue.filter(
+      (socket) => !socket.closed,
+    );
+
     if (this.connectionQueue.length > 0 && !this.isProcessingConnection) {
       const nextSocket = this.connectionQueue.shift();
       if (nextSocket && !nextSocket.closed) {
         this.processConnection(nextSocket);
-      } else if (nextSocket && nextSocket.closed) {
-        // Socket was closed while waiting, try next one
+      } else {
+        // Try next connection (recursive cleanup)
         this.processNextConnection();
       }
     }
   }
 
   getConnectionStats() {
+    // Clean up closed connections before reporting stats
+    this.connectionQueue = this.connectionQueue.filter(
+      (socket) => !socket.closed,
+    );
+
     return {
       current: this.currentConnection ? 1 : 0,
       queued: this.connectionQueue.length,
