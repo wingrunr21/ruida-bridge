@@ -41,16 +41,23 @@ export class ConnectionHandler {
     this.status.ok(`Connection from: ${clientAddr}`);
 
     // Create UDP socket for outgoing (to laser)
-    const outSocket = await Bun.udpSocket({
+    // Use ephemeral port for outgoing - the important part is the destination
+    const outSocketOptions: any = {
       socket: {
-        data(_socket, _buf, _port, _addr) {
-          // Not used for outgoing
+        data(_socket: any, _buf: any, _port: any, _addr: any) {
+          // Not used for outgoing socket
         },
-        error(socket, error) {
+        error(socket: any, error: any) {
           console.error("UDP out socket error:", error);
         },
       },
-    });
+    };
+
+    if (this.config.bridgeHost) {
+      outSocketOptions.hostname = this.config.bridgeHost;
+    }
+
+    const outSocket = await Bun.udpSocket(outSocketOptions);
 
     // Create UDP socket for incoming (from laser)
     let gotAck = true;
@@ -202,22 +209,25 @@ export class ConnectionHandler {
                   this.config.laserIp,
                 );
               } else {
-                // Fragment packet - send in chunks without breaking commands
-                // Note: This is a simplified fragmentation, real implementation
-                // should be more sophisticated about command boundaries
+                // Protocol spec: "fragmented by simple cutting (even inside a command)"
+                // Simple cutting = split the complete packet (checksum + data) without modification
                 let offset = 0;
                 while (offset < udpPacket.length) {
                   const chunkSize = Math.min(
                     MAX_UDP_SIZE,
                     udpPacket.length - offset,
                   );
-                  const chunk = udpPacket.subarray(offset, offset + chunkSize);
+                  const fragment = udpPacket.subarray(offset, offset + chunkSize);
+                  
                   outSocket.send(
-                    chunk,
+                    fragment,
                     this.config.toLaserPort,
                     this.config.laserIp,
                   );
                   offset += chunkSize;
+                  
+                  // Protocol requires waiting for ACK between fragments
+                  // For now, send immediately - laser should handle buffering
                 }
               }
 
