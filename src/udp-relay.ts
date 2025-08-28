@@ -31,8 +31,8 @@ export class UdpRelay {
         );
         this.status.debug(`Response data: ${buf.toString("hex")}`);
 
-        // Handle ACK tracking for single-byte responses
-        if (buf.length === 1) {
+        // Handle ACK tracking - check first byte even if packet is padded
+        if (buf.length >= 1) {
           if (this.ackValue.length === 0) {
             // First ACK received, store it
             this.ackValue = buf;
