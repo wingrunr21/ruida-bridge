@@ -26,36 +26,35 @@ export class UdpRelay {
     }
     try {
       const dataHandler = (sock: any, buf: any, _port: any, _addr: any) => {
-        const data = Buffer.from(buf);
         this.status.debug(
-          `Received UDP response: ${data.length} bytes from laser`,
+          `Received UDP response: ${buf.length} bytes from laser`,
         );
-        this.status.debug(`Response data: ${data.toString("hex")}`);
+        this.status.debug(`Response data: ${buf.toString("hex")}`);
 
         // Handle ACK tracking for single-byte responses
-        if (data.length === 1) {
+        if (buf.length === 1) {
           if (this.ackValue.length === 0) {
             // First ACK received, store it
-            this.ackValue = data;
+            this.ackValue = buf;
             this.gotAck = true;
-          } else if (this.ackValue[0] !== data[0]) {
+          } else if (this.ackValue[0] !== buf[0]) {
             // Different ACK value received
             this.status.warn(
-              `Non-ack received: expected ${this.ackValue[0]?.toString(16)}, got ${data[0]?.toString(16)}`,
+              `Non-ack received: expected ${this.ackValue[0]?.toString(16)}, got ${buf[0]?.toString(16)}`,
             );
-            this.ackValue = data;
+            this.ackValue = buf;
             this.gotAck = true;
           } else {
             // Same ACK as before, don't change gotAck state
             this.status.debug(
-              `Duplicate ACK received: ${data[0]?.toString(16)}`,
+              `Duplicate ACK received: ${buf[0]?.toString(16)}`,
             );
           }
         }
 
         // Forward to all registered callbacks
         this.callbacks.forEach((callback) => {
-          callback.onLaserResponse(data);
+          callback.onLaserResponse(buf);
         });
       };
 
@@ -66,6 +65,7 @@ export class UdpRelay {
       // Create single UDP socket for both sending and receiving
       const socketOptions: any = {
         port: this.config.fromLaserPort, // Bind to port 40200
+        binaryType: "buffer",
         socket: {
           data: dataHandler,
           error: errorHandler,
