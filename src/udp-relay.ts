@@ -68,14 +68,14 @@ export class UdpRelay {
               } else if (this.ackValue[0] !== data[0]) {
                 // Different ACK value received
                 this.status.warn(
-                  `Non-ack received: expected ${this.ackValue[0].toString(16)}, got ${data[0].toString(16)}`,
+                  `Non-ack received: expected ${this.ackValue[0]?.toString(16)}, got ${data[0]?.toString(16)}`,
                 );
                 this.ackValue = data;
                 this.gotAck = true;
               } else {
                 // Same ACK as before, don't change gotAck state
                 this.status.debug(
-                  `Duplicate ACK received: ${data[0].toString(16)}`,
+                  `Duplicate ACK received: ${data[0]?.toString(16)}`,
                 );
               }
             }
