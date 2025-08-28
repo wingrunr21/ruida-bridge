@@ -28,10 +28,22 @@ export interface ConnectionConfig {
   bridgeHost?: string;
 }
 
+interface ConnectionState {
+  packet: Buffer;
+  packetLen: number;
+  packetType: PacketType;
+  gotAck: boolean;
+  lastLen: number;
+  lastTime: number;
+  timeoutCheckInterval: Timer | null;
+  udpCallback: UdpRelayCallbacks;
+}
+
 export class ConnectionHandler {
   private config: ConnectionConfig;
   private status: Status;
   private udpRelay: UdpRelay;
+  private connectionStates = new Map<any, ConnectionState>();
 
   constructor(config: ConnectionConfig, status: Status, udpRelay: UdpRelay) {
     this.config = config;
@@ -43,114 +55,125 @@ export class ConnectionHandler {
     const clientAddr = `${socket.remoteAddress}`;
     this.status.ok(`Connection from: ${clientAddr}`);
 
-    // Connection state for TCP packet parsing
-    let packet = Buffer.alloc(0);
-    let packetLen = 0;
-    let packetType = PacketType.Laser;
-    let gotAck = true;
-    let lastLen = 0;
-    let lastTime = Date.now();
-    let timeoutCheckInterval: Timer | null = null;
-
     // Create callback for UDP responses
     const udpCallback: UdpRelayCallbacks = {
       onLaserResponse: (data: Buffer) => {
         // Forward UDP responses to TCP client
-        this.forwardUdpResponseToTcp(socket, data, lastLen);
+        const state = this.connectionStates.get(socket);
+        if (state) {
+          this.forwardUdpResponseToTcp(socket, data, state.lastLen);
+        }
       },
     };
+
+    // Initialize connection state
+    const connectionState: ConnectionState = {
+      packet: Buffer.alloc(0),
+      packetLen: 0,
+      packetType: PacketType.Laser,
+      gotAck: true,
+      lastLen: 0,
+      lastTime: Date.now(),
+      timeoutCheckInterval: null,
+      udpCallback: udpCallback,
+    };
+
+    this.connectionStates.set(socket, connectionState);
 
     // Register for UDP responses
     this.udpRelay.registerCallback(udpCallback);
 
-    const cleanup = () => {
-      if (timeoutCheckInterval) {
-        clearInterval(timeoutCheckInterval);
-      }
-      this.udpRelay.unregisterCallback(udpCallback);
-    };
-
     try {
-      // Set socket to handle data from TCP client
-      socket.data = (socket: any, data: Uint8Array) => {
-        if (!gotAck) {
+      // Set up timeout checking
+      connectionState.timeoutCheckInterval = setInterval(() => {
+        const state = this.connectionStates.get(socket);
+        if (
+          !state ||
+          state.gotAck ||
+          Date.now() - state.lastTime <= RUIDA_PROTOCOL.LASER_TIMEOUT
+        ) {
           return;
         }
-
-        const buf = Buffer.from(data);
-        packet = Buffer.concat([packet, buf]);
-
-        // Parse packet header (3 bytes: type, length high, length low)
-        if (packetLen === 0 && packet.length >= 3) {
-          packetType = packet[0] ?? PacketType.Laser;
-          packetLen = ((packet[1] ?? 0) << 8) + (packet[2] ?? 0);
-          packet = packet.slice(3);
-        }
-
-        // Process complete packet
-        if (packetLen > 0 && packet.length >= packetLen) {
-          const packetData = packet.slice(0, packetLen);
-          packet = packet.slice(packetLen);
-          packetLen = 0;
-
-          switch (packetType) {
-            case PacketType.Laser: {
-              // Send to laser via shared UDP relay
-              this.udpRelay.sendToLaser(packetData);
-
-              lastLen = packetData.length;
-              lastTime = Date.now();
-              gotAck = false;
-              break;
-            }
-
-            case PacketType.Ping: {
-              // Respond with version directly (no UDP needed)
-              const response = Buffer.from([
-                PacketType.Ping,
-                0x00,
-                0x02, // Length: 2
-                ...this.config.version,
-              ]);
-              socket.write(response);
-              break;
-            }
-
-            default:
-              this.status.error(
-                `Unhandled packet type: 0x${(packetType as number).toString(16)}`,
-              );
-          }
-        }
-      };
-
-      // Timeout check
-      timeoutCheckInterval = setInterval(() => {
-        if (!gotAck && Date.now() - lastTime > RUIDA_PROTOCOL.LASER_TIMEOUT) {
-          this.status.error("Laser timeout error");
-          socket.end();
-        }
+        this.status.error("Laser timeout error");
+        this.cleanupConnection(socket);
+        socket.end();
       }, 1000);
 
-      // Handle socket events
-      socket.drain = () => {
-        // Socket drained
-      };
-
-      socket.close = () => {
-        cleanup();
-        this.status.ok("Ruida command complete");
-      };
-
-      socket.error = (socket: any, error: Error) => {
-        this.status.error(`Client socket error: ${error.message}`);
-        socket.end();
-      };
+      // Connection is set up and ready for data
     } catch (error) {
       this.status.error(`Connection handling error: ${error}`);
-      cleanup();
+      this.cleanupConnection(socket);
       socket.end();
       throw error;
+    }
+  }
+
+  handleData(socket: any, data: Uint8Array): void {
+    const state = this.connectionStates.get(socket);
+    if (!state) {
+      this.status.error("No connection state found for socket data");
+      return;
+    }
+
+    if (!state.gotAck) {
+      return;
+    }
+
+    const buf = Buffer.from(data);
+    state.packet = Buffer.concat([state.packet, buf]);
+
+    // Parse packet header (3 bytes: type, length high, length low)
+    if (state.packetLen === 0 && state.packet.length >= 3) {
+      state.packetType = state.packet[0] ?? PacketType.Laser;
+      state.packetLen = ((state.packet[1] ?? 0) << 8) + (state.packet[2] ?? 0);
+      state.packet = state.packet.slice(3);
+    }
+
+    // Process complete packet
+    if (state.packetLen > 0 && state.packet.length >= state.packetLen) {
+      const packetData = state.packet.slice(0, state.packetLen);
+      state.packet = state.packet.slice(state.packetLen);
+      state.packetLen = 0;
+
+      switch (state.packetType) {
+        case PacketType.Laser: {
+          // Send to laser via shared UDP relay
+          this.udpRelay.sendToLaser(packetData);
+
+          state.lastLen = packetData.length;
+          state.lastTime = Date.now();
+          state.gotAck = false;
+          break;
+        }
+
+        case PacketType.Ping: {
+          // Respond with version directly (no UDP needed)
+          const response = Buffer.from([
+            PacketType.Ping,
+            0x00,
+            0x02, // Length: 2
+            ...this.config.version,
+          ]);
+          socket.write(response);
+          break;
+        }
+
+        default:
+          this.status.error(
+            `Unhandled packet type: 0x${(state.packetType as number).toString(16)}`,
+          );
+      }
+    }
+  }
+
+  cleanupConnection(socket: any): void {
+    const state = this.connectionStates.get(socket);
+    if (state) {
+      if (state.timeoutCheckInterval) {
+        clearInterval(state.timeoutCheckInterval);
+      }
+      this.udpRelay.unregisterCallback(state.udpCallback);
+      this.connectionStates.delete(socket);
     }
   }
 
@@ -159,8 +182,15 @@ export class ConnectionHandler {
     data: Buffer,
     lastLen: number,
   ): void {
+    const state = this.connectionStates.get(socket);
+
     // Single byte responses are ACKs
     if (data.length === 1) {
+      // Mark that we got an ACK
+      if (state) {
+        state.gotAck = true;
+      }
+
       // Forward single-byte ACKs to client only if previous packet was small
       // (filter out ACKs for large data transfers to avoid spam)
       if (lastLen <= 500) {

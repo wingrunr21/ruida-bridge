@@ -49,8 +49,11 @@ export class TcpServer extends EventEmitter {
             `New connection from ${socket.remoteAddress}:${socket.remotePort}`,
           );
         },
-        data: (_socket, _data) => {
-          // Handled per-socket in ConnectionHandler
+        data: (socket, data) => {
+          // Forward to the connection handler for the current connection
+          if (this.currentConnection === socket) {
+            this.connectionHandler.handleData(socket, data);
+          }
         },
         drain: (_socket) => {
           // Handled per-socket in ConnectionHandler
@@ -136,6 +139,9 @@ export class TcpServer extends EventEmitter {
   }
 
   private handleSocketClosed(socket: any): void {
+    // Clean up connection state in the connection handler
+    this.connectionHandler.cleanupConnection(socket);
+
     // Remove from queue if present
     const queueIndex = this.connectionQueue.indexOf(socket);
     if (queueIndex !== -1) {
