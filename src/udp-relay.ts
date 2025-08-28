@@ -24,48 +24,51 @@ export class UdpRelay {
     if (this.isStarted) {
       return;
     }
-    const logger = this.status;
     try {
-      // Create single UDP socket for both sending and receiving (like meerk40t)
+      const dataHandler = (sock: any, buf: any, _port: any, _addr: any) => {
+        const data = Buffer.from(buf);
+        this.status.debug(
+          `Received UDP response: ${data.length} bytes from laser`,
+        );
+        this.status.debug(`Response data: ${data.toString("hex")}`);
+
+        // Handle ACK tracking for single-byte responses
+        if (data.length === 1) {
+          if (this.ackValue.length === 0) {
+            // First ACK received, store it
+            this.ackValue = data;
+            this.gotAck = true;
+          } else if (this.ackValue[0] !== data[0]) {
+            // Different ACK value received
+            this.status.warn(
+              `Non-ack received: expected ${this.ackValue[0]?.toString(16)}, got ${data[0]?.toString(16)}`,
+            );
+            this.ackValue = data;
+            this.gotAck = true;
+          } else {
+            // Same ACK as before, don't change gotAck state
+            this.status.debug(
+              `Duplicate ACK received: ${data[0]?.toString(16)}`,
+            );
+          }
+        }
+
+        // Forward to all registered callbacks
+        this.callbacks.forEach((callback) => {
+          callback.onLaserResponse(data);
+        });
+      };
+
+      const errorHandler = (socket: any, error: any) => {
+        this.status.error(`UDP socket error: ${error}`);
+      };
+
+      // Create single UDP socket for both sending and receiving
       const socketOptions: any = {
         port: this.config.fromLaserPort, // Bind to port 40200
         socket: {
-          data: (sock: any, buf: any, _port: any, _addr: any) => {
-            const data = Buffer.from(buf);
-            this.status.debug(
-              `Received UDP response: ${data.length} bytes from laser`,
-            );
-            this.status.debug(`Response data: ${data.toString("hex")}`);
-
-            // Handle ACK tracking for single-byte responses
-            if (data.length === 1) {
-              if (this.ackValue.length === 0) {
-                // First ACK received, store it
-                this.ackValue = data;
-                this.gotAck = true;
-              } else if (this.ackValue[0] !== data[0]) {
-                // Different ACK value received
-                this.status.warn(
-                  `Non-ack received: expected ${this.ackValue[0]?.toString(16)}, got ${data[0]?.toString(16)}`,
-                );
-                this.ackValue = data;
-                this.gotAck = true;
-              } else {
-                // Same ACK as before, don't change gotAck state
-                this.status.debug(
-                  `Duplicate ACK received: ${data[0]?.toString(16)}`,
-                );
-              }
-            }
-
-            // Forward to all registered callbacks
-            this.callbacks.forEach((callback) => {
-              callback.onLaserResponse(data);
-            });
-          },
-          error: (socket: any, error: any) => {
-            logger.error(`UDP socket error: ${error}`);
-          },
+          data: dataHandler,
+          error: errorHandler,
         },
       };
 
