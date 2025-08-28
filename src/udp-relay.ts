@@ -13,6 +13,8 @@ export class UdpRelay {
   private inSocket: any = null;
   private callbacks: Set<UdpRelayCallbacks> = new Set();
   private isStarted = false;
+  private ackValue = Buffer.alloc(0);
+  private gotAck = true;
 
   constructor(config: ConnectionConfig, status: Status) {
     this.config = config;
@@ -56,6 +58,27 @@ export class UdpRelay {
               `Received UDP response: ${data.length} bytes from laser`,
             );
             this.status.debug(`Response data: ${data.toString("hex")}`);
+
+            // Handle ACK tracking for single-byte responses
+            if (data.length === 1) {
+              if (this.ackValue.length === 0) {
+                // First ACK received, store it
+                this.ackValue = data;
+                this.gotAck = true;
+              } else if (this.ackValue[0] !== data[0]) {
+                // Different ACK value received
+                this.status.warn(
+                  `Non-ack received: expected ${this.ackValue[0].toString(16)}, got ${data[0].toString(16)}`,
+                );
+                this.ackValue = data;
+                this.gotAck = true;
+              } else {
+                // Same ACK as before, don't change gotAck state
+                this.status.debug(
+                  `Duplicate ACK received: ${data[0].toString(16)}`,
+                );
+              }
+            }
 
             // Forward to all registered callbacks
             this.callbacks.forEach((callback) => {
@@ -125,6 +148,13 @@ export class UdpRelay {
       return;
     }
 
+    if (!this.gotAck) {
+      this.status.warn(
+        "Cannot send packet, waiting for ACK from previous packet",
+      );
+      return;
+    }
+
     // Calculate checksum for UDP packet (sum of all bytes, MSB first)
     let checksum = 0;
     for (const byte of packetData) {
@@ -147,38 +177,36 @@ export class UdpRelay {
         `Sending UDP packet: ${udpPacket.length} bytes to ${this.config.laserIp}:${this.config.toLaserPort}`,
       );
       this.status.debug(`Packet data: ${udpPacket.toString("hex")}`);
+
       this.outSocket.send(
         udpPacket,
         this.config.toLaserPort,
         this.config.laserIp,
       );
+
+      // Mark that we're waiting for ACK
+      this.gotAck = false;
     } else {
-      // Protocol spec: "fragmented by simple cutting (even inside a command)"
-      // Simple cutting = split the complete packet (checksum + data) without modification
-      this.status.debug(
-        `Fragmenting large packet: ${udpPacket.length} bytes into ${Math.ceil(udpPacket.length / MAX_UDP_SIZE)} fragments`,
+      // For fragmented packets, we should implement proper ACK waiting
+      // For now, log a warning and send the first fragment only
+      this.status.warn(
+        `Large packet fragmentation not fully implemented: ${udpPacket.length} bytes`,
       );
-      let offset = 0;
-      let fragmentIndex = 0;
-      while (offset < udpPacket.length) {
-        const chunkSize = Math.min(MAX_UDP_SIZE, udpPacket.length - offset);
-        const fragment = udpPacket.subarray(offset, offset + chunkSize);
 
-        this.status.debug(
-          `Sending fragment ${fragmentIndex + 1}: ${fragment.length} bytes to ${this.config.laserIp}:${this.config.toLaserPort}`,
-        );
-        this.status.debug(`Fragment data: ${fragment.toString("hex")}`);
-        this.outSocket.send(
-          fragment,
-          this.config.toLaserPort,
-          this.config.laserIp,
-        );
-        offset += chunkSize;
-        fragmentIndex++;
+      const firstFragment = udpPacket.subarray(0, MAX_UDP_SIZE);
+      this.status.debug(
+        `Sending first fragment: ${firstFragment.length} bytes to ${this.config.laserIp}:${this.config.toLaserPort}`,
+      );
+      this.status.debug(`Fragment data: ${firstFragment.toString("hex")}`);
 
-        // Protocol requires waiting for ACK between fragments
-        // For now, send immediately - laser should handle buffering
-      }
+      this.outSocket.send(
+        firstFragment,
+        this.config.toLaserPort,
+        this.config.laserIp,
+      );
+
+      // Mark that we're waiting for ACK
+      this.gotAck = false;
     }
   }
 }
