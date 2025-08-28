@@ -61,7 +61,7 @@ export class ConnectionHandler {
         // Forward UDP responses to TCP client
         const state = this.connectionStates.get(socket);
         if (state) {
-          this.forwardUdpResponseToTcp(socket, data, state.lastLen);
+          this.forwardUdpResponseToTcp(socket, data);
         }
       },
     };
@@ -190,11 +190,7 @@ export class ConnectionHandler {
     }
   }
 
-  private forwardUdpResponseToTcp(
-    socket: any,
-    data: Buffer,
-    lastLen: number,
-  ): void {
+  private forwardUdpResponseToTcp(socket: any, data: Buffer): void {
     const state = this.connectionStates.get(socket);
 
     // Mark that we got an ACK for single byte responses
@@ -202,23 +198,20 @@ export class ConnectionHandler {
       state.gotAck = true;
     }
 
-    // Forward UDP response to TCP client (matching LightBurn Bridge behavior)
-    // Only forward if lastLen <= 500 OR data.length > 1 (same as LightBurn Bridge)
-    if (data.length > 1 || lastLen <= 500) {
-      if (socket && !socket.closed) {
-        const header = Buffer.from([
-          PacketType.Laser, // UDP responses are laser data
-          (data.length >> 8) & 0xff,
-          data.length & 0xff,
-        ]);
-        try {
-          socket.write(Buffer.concat([header, data]));
-          this.status.debug(
-            `Forwarded UDP response to TCP: ${data.toString("hex")}`,
-          );
-        } catch {
-          // Connection might be closed
-        }
+    // Forward all UDP responses to TCP client
+    if (socket && !socket.closed) {
+      const header = Buffer.from([
+        PacketType.Laser, // UDP responses are laser data
+        (data.length >> 8) & 0xff,
+        data.length & 0xff,
+      ]);
+      try {
+        socket.write(Buffer.concat([header, data]));
+        this.status.debug(
+          `Forwarded UDP response to TCP: ${data.toString("hex")}`,
+        );
+      } catch {
+        // Connection might be closed
       }
     }
   }
