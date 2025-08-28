@@ -31,7 +31,7 @@ export interface ConnectionConfig {
 interface ConnectionState {
   packet: Buffer;
   packetLen: number;
-  packetType: PacketType;
+  packetType: number;
   gotAck: boolean;
   lastLen: number;
   lastTime: number;
@@ -70,7 +70,7 @@ export class ConnectionHandler {
     const connectionState: ConnectionState = {
       packet: Buffer.alloc(0),
       packetLen: 0,
-      packetType: PacketType.Laser,
+      packetType: 0,
       gotAck: true,
       lastLen: 0,
       lastTime: Date.now(),
@@ -122,11 +122,16 @@ export class ConnectionHandler {
     const buf = Buffer.from(data);
     state.packet = Buffer.concat([state.packet, buf]);
 
+    this.status.debug(`Received TCP data: ${buf.toString("hex")}`);
+    this.status.debug(`Current packet buffer: ${state.packet.toString("hex")}`);
+
     // Parse packet header (3 bytes: type, length high, length low)
     if (state.packetLen === 0 && state.packet.length >= 3) {
-      state.packetType = state.packet[0] ?? PacketType.Laser;
+      state.packetType = state.packet[0] ?? 0;
       state.packetLen = ((state.packet[1] ?? 0) << 8) + (state.packet[2] ?? 0);
       state.packet = state.packet.slice(3);
+      
+      this.status.debug(`Parsed packet header: type=${state.packetType.toString(16)}, len=${state.packetLen}`);
     }
 
     // Process complete packet
@@ -135,33 +140,32 @@ export class ConnectionHandler {
       state.packet = state.packet.slice(state.packetLen);
       state.packetLen = 0;
 
-      switch (state.packetType) {
-        case PacketType.Laser: {
-          // Send to laser via shared UDP relay
-          this.udpRelay.sendToLaser(packetData);
+      this.status.debug(`Processing packet: type=${state.packetType.toString(16)}, data=${packetData.toString("hex")}`);
 
-          state.lastLen = packetData.length;
-          state.lastTime = Date.now();
-          state.gotAck = false;
-          break;
-        }
+      if (state.packetType === PacketType.Laser) { // 'L' - Laser packet
+        // Send payload to laser via UDP
+        this.udpRelay.sendToLaser(packetData);
 
-        case PacketType.Ping: {
-          // Respond with version directly (no UDP needed)
-          const response = Buffer.from([
-            PacketType.Ping,
-            0x00,
-            0x02, // Length: 2
-            ...this.config.version,
-          ]);
-          socket.write(response);
-          break;
-        }
+        state.lastLen = packetData.length;
+        state.lastTime = Date.now();
+        state.gotAck = false;
+      } else if (state.packetType === PacketType.Ping) { // 'P' - Protocol/Ping packet  
+        // Respond with version
+        const response = Buffer.from([
+          PacketType.Ping, // 'P'
+          0x00,
+          0x02, // Length: 2
+          ...this.config.version,
+        ]);
+        socket.write(response);
+      } else {
+        // Handle other packet types - for now, forward to laser
+        this.status.debug(`Unknown packet type 0x${state.packetType.toString(16)}, forwarding to laser`);
+        this.udpRelay.sendToLaser(packetData);
 
-        default:
-          this.status.error(
-            `Unhandled packet type: 0x${(state.packetType as number).toString(16)}`,
-          );
+        state.lastLen = packetData.length;
+        state.lastTime = Date.now();
+        state.gotAck = false;
       }
     }
   }
