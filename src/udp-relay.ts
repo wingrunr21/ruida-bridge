@@ -9,8 +9,7 @@ export interface UdpRelayCallbacks {
 export class UdpRelay {
   private config: ConnectionConfig;
   private status: Status;
-  private outSocket: any = null;
-  private inSocket: any = null;
+  private socket: any = null;
   private callbacks: Set<UdpRelayCallbacks> = new Set();
   private isStarted = false;
   private ackValue = Buffer.alloc(0);
@@ -27,32 +26,11 @@ export class UdpRelay {
     }
     const logger = this.status;
     try {
-      // Create UDP socket for outgoing (to laser)
-      const outSocketOptions: any = {
-        socket: {
-          data(_socket: any, _buf: any, _port: any, _addr: any) {
-            // Not used for outgoing socket
-          },
-          error(socket: any, error: any) {
-            logger.error(`UDP out socket error: ${error}`);
-          },
-        },
-      };
-
-      if (this.config.bridgeHost) {
-        outSocketOptions.hostname = this.config.bridgeHost;
-      }
-
-      this.outSocket = await Bun.udpSocket(outSocketOptions);
-      this.status.debug(
-        `Created outgoing UDP socket${this.config.bridgeHost ? ` bound to ${this.config.bridgeHost}` : ""}`,
-      );
-
-      // Create UDP socket for incoming (from laser)
+      // Create single UDP socket for both sending and receiving (like meerk40t)
       const socketOptions: any = {
-        port: this.config.fromLaserPort,
+        port: this.config.fromLaserPort, // Bind to port 40200
         socket: {
-          data: (inSock: any, buf: any, _port: any, _addr: any) => {
+          data: (sock: any, buf: any, _port: any, _addr: any) => {
             const data = Buffer.from(buf);
             this.status.debug(
               `Received UDP response: ${data.length} bytes from laser`,
@@ -86,7 +64,7 @@ export class UdpRelay {
             });
           },
           error: (socket: any, error: any) => {
-            this.status.error(`UDP in socket error: ${error}`);
+            logger.error(`UDP socket error: ${error}`);
           },
         },
       };
@@ -95,9 +73,9 @@ export class UdpRelay {
         socketOptions.hostname = this.config.bridgeHost;
       }
 
-      this.inSocket = await Bun.udpSocket(socketOptions);
+      this.socket = await Bun.udpSocket(socketOptions);
       this.status.debug(
-        `Created incoming UDP socket on port ${this.config.fromLaserPort}${this.config.bridgeHost ? ` bound to ${this.config.bridgeHost}` : ""}`,
+        `Created UDP socket on port ${this.config.fromLaserPort}${this.config.bridgeHost ? ` bound to ${this.config.bridgeHost}` : ""}`,
       );
       this.status.debug(
         `Bridge will send packets to laser at ${this.config.laserIp}:${this.config.toLaserPort}`,
@@ -117,13 +95,9 @@ export class UdpRelay {
     }
 
     try {
-      if (this.inSocket) {
-        this.inSocket.close();
-        this.inSocket = null;
-      }
-      if (this.outSocket) {
-        this.outSocket.close();
-        this.outSocket = null;
+      if (this.socket) {
+        this.socket.close();
+        this.socket = null;
       }
 
       this.callbacks.clear();
@@ -160,7 +134,7 @@ export class UdpRelay {
   }
 
   sendToLaser(packetData: Buffer): void {
-    if (!this.isStarted || !this.outSocket) {
+    if (!this.isStarted || !this.socket) {
       this.status.error("UDP relay not started, cannot send packet");
       return;
     }
@@ -198,11 +172,7 @@ export class UdpRelay {
       );
       this.status.debug(`Packet data: ${udpPacket.toString("hex")}`);
 
-      this.outSocket.send(
-        udpPacket,
-        this.config.toLaserPort,
-        this.config.laserIp,
-      );
+      this.socket.send(udpPacket, this.config.toLaserPort, this.config.laserIp);
 
       // Mark that we're waiting for ACK
       this.gotAck = false;
@@ -219,7 +189,7 @@ export class UdpRelay {
       );
       this.status.debug(`Fragment data: ${firstFragment.toString("hex")}`);
 
-      this.outSocket.send(
+      this.socket.send(
         firstFragment,
         this.config.toLaserPort,
         this.config.laserIp,
