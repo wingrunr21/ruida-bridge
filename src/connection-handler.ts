@@ -150,6 +150,9 @@ export class ConnectionHandler {
         // 'L' - Laser packet
         // Send payload to laser via UDP
         this.udpRelay.sendToLaser(packetData);
+        this.status.debug(
+          `Got laser packet. Forwarded to laser: ${packetData.toString("hex")}`,
+        );
 
         state.lastLen = packetData.length;
         state.lastTime = Date.now();
@@ -163,17 +166,15 @@ export class ConnectionHandler {
           0x02, // Length: 2
           ...this.config.version,
         ]);
+        this.status.debug(
+          `Got Ping packet. Responded with version: ${response.toString("hex")}`,
+        );
         socket.write(response);
       } else {
-        // Handle other packet types - for now, forward to laser
-        this.status.debug(
-          `Unknown packet type 0x${state.packetType.toString(16)}, forwarding to laser`,
+        // Unknown packet types are dropped (not forwarded to laser)
+        this.status.error(
+          `Unhandled packet type 0x${state.packetType.toString(16)} (${String.fromCharCode(state.packetType)})`,
         );
-        this.udpRelay.sendToLaser(packetData);
-
-        state.lastLen = packetData.length;
-        state.lastTime = Date.now();
-        state.gotAck = false;
       }
     }
   }
@@ -196,57 +197,25 @@ export class ConnectionHandler {
   ): void {
     const state = this.connectionStates.get(socket);
 
-    // Single byte responses are ACKs
-    if (data.length === 1) {
-      // Mark that we got an ACK
-      if (state) {
-        state.gotAck = true;
-      }
+    // Mark that we got an ACK for single byte responses
+    if (data.length === 1 && state) {
+      state.gotAck = true;
+    }
 
-      // Forward single-byte ACKs to client only if previous packet was small
-      // (filter out ACKs for large data transfers to avoid spam)
-      if (lastLen <= 500) {
-        if (socket && !socket.closed) {
-          const header = Buffer.from([
-            PacketType.Laser, // UDP ACKs are laser responses
-            (data.length >> 8) & 0xff,
-            data.length & 0xff,
-          ]);
-          try {
-            socket.write(Buffer.concat([header, data]));
-          } catch {
-            // Connection might be closed
-          }
-        }
-      }
-    } else if (data.length > 2) {
-      // Validate checksum for multi-byte responses
-      const receivedChecksum = ((data[0] ?? 0) << 8) | (data[1] ?? 0);
-      const payload = data.slice(2);
-
-      // Calculate expected checksum
-      let expectedChecksum = 0;
-      for (const byte of payload) {
-        expectedChecksum += byte;
-      }
-      expectedChecksum = expectedChecksum & 0xffff;
-
-      if (receivedChecksum !== expectedChecksum) {
-        // Checksum error - log but still forward (let client handle)
-        console.warn(
-          `UDP checksum mismatch: expected ${expectedChecksum}, got ${receivedChecksum}`,
-        );
-      }
-
-      // Forward payload (without checksum) to client via TCP
+    // Forward UDP response to TCP client (matching LightBurn Bridge behavior)
+    // Only forward if lastLen <= 500 OR data.length > 1 (same as LightBurn Bridge)
+    if (data.length > 1 || lastLen <= 500) {
       if (socket && !socket.closed) {
         const header = Buffer.from([
           PacketType.Laser, // UDP responses are laser data
-          (payload.length >> 8) & 0xff,
-          payload.length & 0xff,
+          (data.length >> 8) & 0xff,
+          data.length & 0xff,
         ]);
         try {
-          socket.write(Buffer.concat([header, payload]));
+          socket.write(Buffer.concat([header, data]));
+          this.status.debug(
+            `Forwarded UDP response to TCP: ${data.toString("hex")}`,
+          );
         } catch {
           // Connection might be closed
         }
