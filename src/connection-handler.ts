@@ -130,8 +130,10 @@ export class ConnectionHandler {
       state.packetType = state.packet[0] ?? 0;
       state.packetLen = ((state.packet[1] ?? 0) << 8) + (state.packet[2] ?? 0);
       state.packet = state.packet.slice(3);
-      
-      this.status.debug(`Parsed packet header: type=${state.packetType.toString(16)}, len=${state.packetLen}`);
+
+      this.status.debug(
+        `Parsed packet header: type=${state.packetType.toString(16)}, len=${state.packetLen}`,
+      );
     }
 
     // Process complete packet
@@ -140,16 +142,20 @@ export class ConnectionHandler {
       state.packet = state.packet.slice(state.packetLen);
       state.packetLen = 0;
 
-      this.status.debug(`Processing packet: type=${state.packetType.toString(16)}, data=${packetData.toString("hex")}`);
+      this.status.debug(
+        `Processing packet: type=${state.packetType.toString(16)}, data=${packetData.toString("hex")}`,
+      );
 
-      if (state.packetType === PacketType.Laser) { // 'L' - Laser packet
+      if (state.packetType === PacketType.Laser) {
+        // 'L' - Laser packet
         // Send payload to laser via UDP
         this.udpRelay.sendToLaser(packetData);
 
         state.lastLen = packetData.length;
         state.lastTime = Date.now();
         state.gotAck = false;
-      } else if (state.packetType === PacketType.Ping) { // 'P' - Protocol/Ping packet  
+      } else if (state.packetType === PacketType.Ping) {
+        // 'P' - Protocol/Ping packet
         // Respond with version
         const response = Buffer.from([
           PacketType.Ping, // 'P'
@@ -160,7 +166,9 @@ export class ConnectionHandler {
         socket.write(response);
       } else {
         // Handle other packet types - for now, forward to laser
-        this.status.debug(`Unknown packet type 0x${state.packetType.toString(16)}, forwarding to laser`);
+        this.status.debug(
+          `Unknown packet type 0x${state.packetType.toString(16)}, forwarding to laser`,
+        );
         this.udpRelay.sendToLaser(packetData);
 
         state.lastLen = packetData.length;
