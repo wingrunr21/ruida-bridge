@@ -142,6 +142,23 @@ export class UdpRelay {
     this.callbacks.delete(callback);
   }
 
+  private swizzleByte(b: number, magic: number = 0x88): number {
+    b ^= (b >> 7) & 0xff;
+    b ^= (b << 7) & 0xff;
+    b ^= (b >> 7) & 0xff;
+    b ^= magic;
+    b = (b + 1) & 0xff;
+    return b;
+  }
+
+  private encodeBytes(data: Buffer, magic: number = 0x88): Buffer {
+    const encoded = Buffer.alloc(data.length);
+    for (let i = 0; i < data.length; i++) {
+      encoded[i] = this.swizzleByte(data[i] ?? 0, magic);
+    }
+    return encoded;
+  }
+
   sendToLaser(packetData: Buffer): void {
     if (!this.isStarted || !this.outSocket) {
       this.status.error("UDP relay not started, cannot send packet");
@@ -155,9 +172,12 @@ export class UdpRelay {
       return;
     }
 
-    // Calculate checksum for UDP packet (sum of all bytes, MSB first)
+    // Encode bytes using Ruida protocol scrambling
+    const encodedData = this.encodeBytes(packetData);
+
+    // Calculate checksum for UDP packet (sum of encoded bytes, MSB first)
     let checksum = 0;
-    for (const byte of packetData) {
+    for (const byte of encodedData) {
       checksum += byte;
     }
     checksum = checksum & 0xffff; // Keep it 16-bit
@@ -167,7 +187,7 @@ export class UdpRelay {
       (checksum >> 8) & 0xff, // MSB first
       checksum & 0xff,
     ]);
-    const udpPacket = Buffer.concat([checksumHeader, packetData]);
+    const udpPacket = Buffer.concat([checksumHeader, encodedData]);
 
     // Enforce maximum UDP packet size
     const MAX_UDP_SIZE = RUIDA_PROTOCOL.MAX_UDP_SIZE;
