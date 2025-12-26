@@ -23,25 +23,18 @@ services:
       retries: 3
     restart: unless-stopped
 
-  go2rtc:
-    image: alexxit/go2rtc:latest
-    container_name: go2rtc
+  ustreamer:
+    image: pikvm/ustreamer:latest
+    container_name: ustreamer
+    devices:
+      - /dev/video0:/dev/video0
     ports:
-      - "1984:1984/tcp" # Web interface
-      - "8554:8554/tcp" # RTSP server
-      - "8555:8555/tcp" # WebRTC
-    volumes:
-      - ./config/go2rtc.yaml:/config/go2rtc.yaml:ro
-      - go2rtc_data:/data
-    environment:
-      - TZ=UTC
+      - "8080:8080/tcp"
+    command: ["-c", "HW", "-m", "MJPEG"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:1984"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 30s
       timeout: 10s
       start_period: 15s
       retries: 3
     restart: unless-stopped
-
-volumes:
-  go2rtc_data:
