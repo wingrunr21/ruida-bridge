@@ -1,9 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(bun test:*)",
-      "Bash(bun run lint:*)",
-      "Bash(bun run:*)"
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "Bash(bun run lint:fix:*)",
+      "Bash(bun test:*)"
     ],
     "deny": [],
     "ask": []
