@@ -15,9 +15,18 @@ export const RUIDA_PROTOCOL = {
   // ACK responses from laser
   ACK_SUCCESS: 0xc6, // All is well, send next chunk
   ACK_ERROR: 0x46, // Checksum error or busy
+  ACK_CHECKSUM_MATCH: 0xcc, // Checksum match (handshake response)
+  ACK_CHECKSUM_FAIL: 0xcf, // Checksum fail
+
+  // Control bytes
+  CMD_CONNECT: 0xcc, // Connect handshake
+  CMD_DISCONNECT: 0xcd, // Disconnect packet
+  CMD_KEEPALIVE: 0xce, // Keepalive packet
 
   // Timeout for laser communication
   LASER_TIMEOUT: 6000, // 6 seconds
+  HANDSHAKE_TIMEOUT: 2000, // 2 seconds for handshake
+  KEEPALIVE_INTERVAL: 3000, // 3 seconds keepalive interval
 } as const;
 
 export interface ConnectionConfig {
@@ -193,9 +202,24 @@ export class ConnectionHandler {
   private forwardUdpResponseToTcp(socket: any, data: Buffer): void {
     const state = this.connectionStates.get(socket);
 
-    // Mark that we got an ACK for single byte responses
+    // Mark that we got an ACK for successful single byte responses
     if (data.length === 1 && state) {
-      state.gotAck = true;
+      const ackByte = data[0];
+
+      // Only mark as ACK if it's a success response
+      if (
+        ackByte === RUIDA_PROTOCOL.ACK_SUCCESS ||
+        ackByte === RUIDA_PROTOCOL.ACK_CHECKSUM_MATCH
+      ) {
+        state.gotAck = true;
+      } else if (
+        ackByte === RUIDA_PROTOCOL.ACK_ERROR ||
+        ackByte === RUIDA_PROTOCOL.ACK_CHECKSUM_FAIL
+      ) {
+        // Error responses should not set gotAck
+        state.gotAck = false;
+        this.status.error(`Laser reported error: 0x${ackByte.toString(16)}`);
+      }
     }
 
     // Forward all UDP responses to TCP client

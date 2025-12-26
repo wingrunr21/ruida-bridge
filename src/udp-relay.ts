@@ -12,8 +12,13 @@ export class UdpRelay {
   private socket: any = null;
   private callbacks: Set<UdpRelayCallbacks> = new Set();
   private isStarted = false;
-  private ackValue = Buffer.alloc(0);
   private gotAck = true;
+  private isHandshakeComplete = false;
+  private pendingFragments: Buffer[] = [];
+  private currentFragmentIndex = 0;
+  private retryCount = 0;
+  private maxRetries = 3;
+  private keepaliveInterval: Timer | null = null;
 
   constructor(config: ConnectionConfig, status: Status) {
     this.config = config;
@@ -31,25 +36,14 @@ export class UdpRelay {
         );
         this.status.debug(`Response data: ${buf.toString("hex")}`);
 
-        // Handle ACK tracking - check first byte even if packet is padded
-        if (buf.length >= 1) {
-          if (this.ackValue.length === 0) {
-            // First ACK received, store it
-            this.ackValue = buf;
-            this.gotAck = true;
-          } else if (this.ackValue[0] !== buf[0]) {
-            // Different ACK value received
-            this.status.warn(
-              `Non-ack received: expected ${this.ackValue[0]?.toString(16)}, got ${buf[0]?.toString(16)}`,
-            );
-            this.ackValue = buf;
-            this.gotAck = true;
-          } else {
-            // Same ACK as before, don't change gotAck state
-            this.status.debug(
-              `Duplicate ACK received: ${buf[0]?.toString(16)}`,
-            );
-          }
+        // Handle single-byte ACK responses
+        if (buf.length === 1) {
+          const ackByte = buf[0];
+          this.handleAckResponse(ackByte);
+        } else {
+          // Multi-byte responses (data responses)
+          this.status.debug(`Received data response: ${buf.toString("hex")}`);
+          this.gotAck = true;
         }
 
         // Forward to all registered callbacks
@@ -86,6 +80,9 @@ export class UdpRelay {
 
       this.isStarted = true;
       this.status.ok("UDP relay started");
+
+      // Send handshake
+      this.sendHandshake();
     } catch (error) {
       this.status.error(`Failed to start UDP relay: ${error}`);
       throw error;
@@ -98,6 +95,15 @@ export class UdpRelay {
     }
 
     try {
+      // Send disconnect packet
+      this.sendDisconnect();
+
+      // Clear keepalive interval
+      if (this.keepaliveInterval) {
+        clearInterval(this.keepaliveInterval);
+        this.keepaliveInterval = null;
+      }
+
       if (this.socket) {
         this.socket.close();
         this.socket = null;
@@ -105,6 +111,7 @@ export class UdpRelay {
 
       this.callbacks.clear();
       this.isStarted = false;
+      this.isHandshakeComplete = false;
       this.status.info("UDP relay stopped");
     } catch (error) {
       this.status.error(`Error stopping UDP relay: ${error}`);
@@ -119,13 +126,167 @@ export class UdpRelay {
     this.callbacks.delete(callback);
   }
 
+  private handleAckResponse(ackByte: number): void {
+    this.status.debug(`Handling ACK response: 0x${ackByte.toString(16)}`);
+
+    switch (ackByte) {
+      case RUIDA_PROTOCOL.ACK_SUCCESS:
+        this.status.debug("ACK Success - ready for next chunk");
+        this.gotAck = true;
+        this.retryCount = 0;
+
+        // If we have pending fragments, send the next one
+        if (this.pendingFragments.length > 0) {
+          this.currentFragmentIndex++;
+          if (this.currentFragmentIndex < this.pendingFragments.length) {
+            this.sendFragment(this.currentFragmentIndex);
+          } else {
+            // All fragments sent
+            this.pendingFragments = [];
+            this.currentFragmentIndex = 0;
+          }
+        }
+        break;
+
+      case RUIDA_PROTOCOL.ACK_ERROR:
+        this.status.error("ACK Error - checksum error or busy");
+        this.gotAck = false;
+
+        // Retry first chunk, abort subsequent chunks
+        if (
+          this.currentFragmentIndex === 0 &&
+          this.retryCount < this.maxRetries
+        ) {
+          this.retryCount++;
+          this.status.warn(
+            `Retrying first chunk (attempt ${this.retryCount}/${this.maxRetries})`,
+          );
+          setTimeout(() => {
+            if (this.pendingFragments.length > 0) {
+              this.sendFragment(0);
+            }
+          }, 100);
+        } else {
+          this.status.error("Aborting transmission due to error");
+          this.pendingFragments = [];
+          this.currentFragmentIndex = 0;
+          this.retryCount = 0;
+          this.gotAck = true; // Reset to allow new packets
+        }
+        break;
+
+      case RUIDA_PROTOCOL.ACK_CHECKSUM_MATCH:
+        this.status.ok("Handshake complete - checksum match");
+        this.isHandshakeComplete = true;
+        this.gotAck = true;
+
+        // Start keepalive
+        this.startKeepalive();
+        break;
+
+      case RUIDA_PROTOCOL.ACK_CHECKSUM_FAIL:
+        this.status.error("Handshake failed - checksum mismatch");
+        this.isHandshakeComplete = false;
+        this.gotAck = false;
+        break;
+
+      default:
+        this.status.warn(`Unknown ACK byte: 0x${ackByte.toString(16)}`);
+        this.gotAck = true;
+        break;
+    }
+  }
+
+  private sendHandshake(): void {
+    if (!this.socket) {
+      this.status.error("Cannot send handshake - socket not initialized");
+      return;
+    }
+
+    this.status.info("Sending handshake (0xCC) to laser");
+    const handshakePacket = Buffer.from([RUIDA_PROTOCOL.CMD_CONNECT]);
+
+    this.socket.send(
+      handshakePacket,
+      this.config.toLaserPort,
+      this.config.laserIp,
+    );
+
+    // Set a timeout for handshake response
+    setTimeout(() => {
+      if (!this.isHandshakeComplete) {
+        this.status.warn("Handshake timeout - retrying");
+        this.sendHandshake();
+      }
+    }, RUIDA_PROTOCOL.HANDSHAKE_TIMEOUT);
+  }
+
+  private sendDisconnect(): void {
+    if (!this.socket) {
+      return;
+    }
+
+    this.status.debug("Sending disconnect (0xCD) to laser");
+    const disconnectPacket = Buffer.from([RUIDA_PROTOCOL.CMD_DISCONNECT]);
+
+    this.socket.send(
+      disconnectPacket,
+      this.config.toLaserPort,
+      this.config.laserIp,
+    );
+  }
+
+  private startKeepalive(): void {
+    if (this.keepaliveInterval) {
+      clearInterval(this.keepaliveInterval);
+    }
+
+    this.keepaliveInterval = setInterval(() => {
+      if (this.socket && this.isHandshakeComplete && this.gotAck) {
+        this.status.debug("Sending keepalive (0xCE) to laser");
+        const keepalivePacket = Buffer.from([RUIDA_PROTOCOL.CMD_KEEPALIVE]);
+
+        this.socket.send(
+          keepalivePacket,
+          this.config.toLaserPort,
+          this.config.laserIp,
+        );
+      }
+    }, RUIDA_PROTOCOL.KEEPALIVE_INTERVAL);
+  }
+
+  private sendFragment(fragmentIndex: number): void {
+    if (fragmentIndex >= this.pendingFragments.length) {
+      this.status.error(`Invalid fragment index: ${fragmentIndex}`);
+      return;
+    }
+
+    const fragment = this.pendingFragments[fragmentIndex];
+    if (!fragment) {
+      this.status.error(`Fragment ${fragmentIndex} is undefined`);
+      return;
+    }
+
+    this.status.debug(
+      `Sending fragment ${fragmentIndex + 1}/${this.pendingFragments.length}: ${fragment.length} bytes`,
+    );
+    this.status.debug(`Fragment data: ${fragment.toString("hex")}`);
+
+    this.socket.send(fragment, this.config.toLaserPort, this.config.laserIp);
+    this.gotAck = false;
+  }
+
   private swizzleByte(b: number, magic: number = 0x88): number {
-    b ^= (b >> 7) & 0xff;
-    b ^= (b << 7) & 0xff;
-    b ^= (b >> 7) & 0xff;
-    b ^= magic;
-    b = (b + 1) & 0xff;
-    return b;
+    // Reference implementation from jnweiger/ruida-laser
+    // Swap high bit and low bit, then XOR with magic and increment
+    const fb = b & 0x80; // Get high bit
+    const lb = b & 0x01; // Get low bit
+    let res_b = b - fb - lb; // Clear both bits
+    res_b |= lb << 7; // Swap: low bit to high position
+    res_b |= fb >> 7; // Swap: high bit to low position
+    res_b ^= magic;
+    res_b = (res_b + 1) & 0xff;
+    return res_b;
   }
 
   private encodeBytes(data: Buffer, magic: number = 0x88): Buffer {
@@ -139,6 +300,11 @@ export class UdpRelay {
   sendToLaser(packetData: Buffer): void {
     if (!this.isStarted || !this.socket) {
       this.status.error("UDP relay not started, cannot send packet");
+      return;
+    }
+
+    if (!this.isHandshakeComplete) {
+      this.status.warn("Cannot send packet, waiting for handshake to complete");
       return;
     }
 
@@ -180,26 +346,25 @@ export class UdpRelay {
       // Mark that we're waiting for ACK
       this.gotAck = false;
     } else {
-      // For fragmented packets, we should implement proper ACK waiting
-      // For now, log a warning and send the first fragment only
-      this.status.warn(
-        `Large packet fragmentation not fully implemented: ${udpPacket.length} bytes`,
+      // Fragment the packet
+      this.status.info(
+        `Fragmenting large packet: ${udpPacket.length} bytes into chunks of ${MAX_UDP_SIZE}`,
       );
 
-      const firstFragment = udpPacket.subarray(0, MAX_UDP_SIZE);
-      this.status.debug(
-        `Sending first fragment: ${firstFragment.length} bytes to ${this.config.laserIp}:${this.config.toLaserPort}`,
-      );
-      this.status.debug(`Fragment data: ${firstFragment.toString("hex")}`);
+      this.pendingFragments = [];
+      for (let i = 0; i < udpPacket.length; i += MAX_UDP_SIZE) {
+        const fragment = udpPacket.subarray(
+          i,
+          Math.min(i + MAX_UDP_SIZE, udpPacket.length),
+        );
+        this.pendingFragments.push(fragment);
+      }
 
-      this.socket.send(
-        firstFragment,
-        this.config.toLaserPort,
-        this.config.laserIp,
-      );
+      this.status.debug(`Created ${this.pendingFragments.length} fragments`);
 
-      // Mark that we're waiting for ACK
-      this.gotAck = false;
+      // Send first fragment
+      this.currentFragmentIndex = 0;
+      this.sendFragment(0);
     }
   }
 }
