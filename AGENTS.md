@@ -59,19 +59,22 @@ Checksum has to be sent before message.
 - The device sends responses from port 40200.
 - An RD file is transferred as payload, same commands and syntax as with USB-Serial or USB-MassStorage.
 - The payload is split in chunks with a well known maximum size (MTU = 1472 bytes including checksum). (The last packet is usually shorter)
-- **Handshake**: Before sending data, a handshake should be attempted by sending `0xCC` (properly encoded and checksummed) and waiting for `0xCC` response. If the handshake fails after 3 attempts, data transmission proceeds anyway as some controllers may not implement this feature.
 - Each chunk starts with a two byte checksum (MSB first), followed by **swizzled/encoded** payload data. Length of the payload is implicit by the UDP datagram size. (Would not work with TCP)
-- **IMPORTANT**: ALL data (including control bytes 0xCC, 0xCD, 0xCE) must be swizzled/encoded before checksum calculation and transmission.
 - Each chunk is acknowledged with a single byte response packet:
   - `0xC6`: Packet received successfully, send next chunk
   - `0x46`: Error (checksum or busy)
-  - `0xCC`: Checksum match (for handshake)
-  - `0xCF`: Checksum fail
-- The first chunk should be retried when `0x46` was received. For subsequent chunks transmission should be aborted.
-- **Control Bytes**:
-  - `0xCC`: Connect/handshake packet (must be sent first)
-  - `0xCD`: Disconnect packet (should be sent on connection close)
-  - `0xCE`: Keepalive packet (for maintaining connection)
+
+### Bridge Implementation
+
+This bridge operates as a **pure passthrough relay** matching the official [LightBurn Bridge](https://github.com/cdedwards/lightburn-bridge) Python implementation:
+
+- **TCP → UDP**: Strips the 3-byte TCP header `[type][len_high][len_low]` and forwards the packet payload AS-IS to the laser (no swizzling, no checksum calculation, no transformations)
+- **UDP → TCP**: Adds the 3-byte TCP header and forwards the laser response AS-IS to LightBurn (no unswizzling, no header stripping, no transformations)
+- **No handshake sequence**: LightBurn handles all protocol details
+- **No disconnect/keepalive packets**: LightBurn manages the connection lifecycle
+- **Flow control**: Single-byte ACK responses (0xC6, 0x46) are used for simple flow control to prevent overwhelming the laser
+
+LightBurn software is responsible for all Ruida protocol formatting, including swizzling/encoding, checksum calculation, and command structure. The bridge simply relays formatted packets between the TCP and UDP transports.
 
 ### Values
 
@@ -135,4 +138,15 @@ See `docker/docker-compose.yml` for the full configuration.
 - **UDP 40200**: Incoming from laser (fixed)
 - **UDP 50200**: Outgoing to laser (fixed)
 - **TCP 3000**: Status/health endpoint (default)
+
+## Environment Variables
+
+- **LASER_IP**: IP address of the Ruida laser controller (required)
+- **BRIDGE_HOST**: IP address to bind the bridge to (default: 0.0.0.0)
+- **SERVER_PORT**: TCP port for client connections (default: 5005)
+- **LOG_LEVEL**: Logging verbosity (default: INFO)
+  - `ERROR`: Only errors
+  - `WARN`: Warnings and errors
+  - `INFO`: Info, warnings, errors, and status messages (recommended for production)
+  - `DEBUG`: All messages including detailed packet data (use for troubleshooting only, impacts performance)
 

@@ -55,8 +55,11 @@ export class TcpServer extends EventEmitter {
             this.connectionHandler.handleData(socket, data);
           }
         },
-        drain: (_socket) => {
-          // Handled per-socket in ConnectionHandler
+        drain: (socket) => {
+          // Socket is ready to accept more writes
+          if (this.currentConnection === socket) {
+            this.connectionHandler.handleDrain(socket);
+          }
         },
         close: (socket) => {
           this.status.debug("Server socket closed");

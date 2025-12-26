@@ -14,7 +14,7 @@ services:
       - HOST=0.0.0.0
       - PORT=3000
       - NODE_ENV=production
-      - LOG_LEVEL=info
+      - LOG_LEVEL=INFO
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/status"]
       interval: 30s

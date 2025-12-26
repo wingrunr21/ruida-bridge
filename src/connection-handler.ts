@@ -46,6 +46,8 @@ interface ConnectionState {
   lastTime: number;
   timeoutCheckInterval: Timer | null;
   udpCallback: UdpRelayCallbacks;
+  canWrite: boolean;
+  pendingWrites: Buffer[];
 }
 
 export class ConnectionHandler {
@@ -63,6 +65,10 @@ export class ConnectionHandler {
   async handleConnection(socket: any): Promise<void> {
     const clientAddr = `${socket.remoteAddress}`;
     this.status.ok(`Connection from: ${clientAddr}`);
+
+    // Configure TCP socket options to match Python implementation
+    // Disable Nagle's algorithm for immediate packet transmission
+    socket.setNoDelay(true);
 
     // Create callback for UDP responses
     const udpCallback: UdpRelayCallbacks = {
@@ -85,6 +91,8 @@ export class ConnectionHandler {
       lastTime: Date.now(),
       timeoutCheckInterval: null,
       udpCallback: udpCallback,
+      canWrite: true,
+      pendingWrites: [],
     };
 
     this.connectionStates.set(socket, connectionState);
@@ -114,6 +122,67 @@ export class ConnectionHandler {
       this.cleanupConnection(socket);
       socket.end();
       throw error;
+    }
+  }
+
+  handleDrain(socket: any): void {
+    const state = this.connectionStates.get(socket);
+    if (!state) {
+      return;
+    }
+
+    this.status.debug("Socket drained, flushing pending writes");
+    state.canWrite = true;
+
+    // Flush any pending writes
+    while (state.pendingWrites.length > 0 && state.canWrite) {
+      const data = state.pendingWrites.shift();
+      if (data) {
+        this.writeToSocket(socket, data);
+      }
+    }
+  }
+
+  private writeToSocket(socket: any, data: Buffer): void {
+    const state = this.connectionStates.get(socket);
+    if (!state || !socket || socket.closed) {
+      return;
+    }
+
+    if (!state.canWrite) {
+      // Queue for later
+      state.pendingWrites.push(data);
+      this.status.debug(
+        `Socket not ready, queued write (${state.pendingWrites.length} pending)`,
+      );
+      return;
+    }
+
+    try {
+      this.status.debug(`Writing ${data.length} bytes to TCP: ${data.toString("hex")}`);
+
+      // socket.write() returns number of bytes written
+      // -1 if closed, or less than data.length if buffer is full
+      const bytesWritten = socket.write(data);
+
+      this.status.debug(`TCP write returned: ${bytesWritten} bytes`);
+
+      if (bytesWritten === -1) {
+        this.status.error("Socket closed during write");
+        return;
+      }
+
+      if (bytesWritten < data.length) {
+        // Partial write - buffer is full, queue the rest
+        const remaining = data.subarray(bytesWritten);
+        state.pendingWrites.unshift(remaining); // Add to front of queue
+        state.canWrite = false;
+        this.status.debug(
+          `Socket buffer full, wrote ${bytesWritten}/${data.length} bytes, queued ${remaining.length} bytes`,
+        );
+      }
+    } catch (error) {
+      this.status.error(`Socket write error: ${error}`);
     }
   }
 
@@ -178,7 +247,7 @@ export class ConnectionHandler {
         this.status.debug(
           `Got Ping packet. Responded with version: ${response.toString("hex")}`,
         );
-        socket.write(response);
+        this.writeToSocket(socket, response);
       } else {
         // Unknown packet types are dropped (not forwarded to laser)
         this.status.error(
@@ -201,9 +270,30 @@ export class ConnectionHandler {
 
   private forwardUdpResponseToTcp(socket: any, data: Buffer): void {
     const state = this.connectionStates.get(socket);
+    if (!state) {
+      return;
+    }
 
-    // Mark that we got an ACK for successful single byte responses
-    if (data.length === 1 && state) {
+    // Forward all UDP responses to TCP client FIRST
+    if (socket && !socket.closed) {
+      const header = Buffer.from([
+        PacketType.Laser, // UDP responses are laser data
+        (data.length >> 8) & 0xff,
+        data.length & 0xff,
+      ]);
+
+      // Combine and send with backpressure handling
+      const response = Buffer.concat([header, data]);
+      this.writeToSocket(socket, response);
+      this.status.debug(
+        `Forwarded UDP response to TCP: ${data.toString("hex")}`,
+      );
+    }
+
+    // THEN mark that we got an ACK/response for flow control
+    // This ensures we don't accept new data until current response is written
+    if (data.length === 1) {
+      // Single-byte ACK responses
       const ackByte = data[0];
 
       // Only mark as ACK if it's a success response
@@ -220,23 +310,9 @@ export class ConnectionHandler {
         state.gotAck = false;
         this.status.error(`Laser reported error: 0x${ackByte.toString(16)}`);
       }
-    }
-
-    // Forward all UDP responses to TCP client
-    if (socket && !socket.closed) {
-      const header = Buffer.from([
-        PacketType.Laser, // UDP responses are laser data
-        (data.length >> 8) & 0xff,
-        data.length & 0xff,
-      ]);
-      try {
-        socket.write(Buffer.concat([header, data]));
-        this.status.debug(
-          `Forwarded UDP response to TCP: ${data.toString("hex")}`,
-        );
-      } catch {
-        // Connection might be closed
-      }
+    } else {
+      // Multi-byte data responses also indicate ready for next packet
+      state.gotAck = true;
     }
   }
 }
