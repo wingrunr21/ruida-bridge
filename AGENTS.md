@@ -59,8 +59,9 @@ Checksum has to be sent before message.
 - The device sends responses from port 40200.
 - An RD file is transferred as payload, same commands and syntax as with USB-Serial or USB-MassStorage.
 - The payload is split in chunks with a well known maximum size (MTU = 1472 bytes including checksum). (The last packet is usually shorter)
-- **Handshake**: Before sending data, a handshake must be performed by sending `0xCC` and waiting for `0xCC` response.
-- Each chunk starts with a two byte checksum (MSB first), followed by payload data. Length of the payload is implicit by the UDP datagram size. (Would not work with TCP)
+- **Handshake**: Before sending data, a handshake should be attempted by sending `0xCC` (properly encoded and checksummed) and waiting for `0xCC` response. If the handshake fails after 3 attempts, data transmission proceeds anyway as some controllers may not implement this feature.
+- Each chunk starts with a two byte checksum (MSB first), followed by **swizzled/encoded** payload data. Length of the payload is implicit by the UDP datagram size. (Would not work with TCP)
+- **IMPORTANT**: ALL data (including control bytes 0xCC, 0xCD, 0xCE) must be swizzled/encoded before checksum calculation and transmission.
 - Each chunk is acknowledged with a single byte response packet:
   - `0xC6`: Packet received successfully, send next chunk
   - `0x46`: Error (checksum or busy)

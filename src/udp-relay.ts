@@ -18,6 +18,8 @@ export class UdpRelay {
   private currentFragmentIndex = 0;
   private retryCount = 0;
   private maxRetries = 3;
+  private handshakeRetryCount = 0;
+  private maxHandshakeRetries = 3;
   private keepaliveInterval: Timer | null = null;
 
   constructor(config: ConnectionConfig, status: Status) {
@@ -112,6 +114,7 @@ export class UdpRelay {
       this.callbacks.clear();
       this.isStarted = false;
       this.isHandshakeComplete = false;
+      this.handshakeRetryCount = 0;
       this.status.info("UDP relay stopped");
     } catch (error) {
       this.status.error(`Error stopping UDP relay: ${error}`);
@@ -179,6 +182,7 @@ export class UdpRelay {
         this.status.ok("Handshake complete - checksum match");
         this.isHandshakeComplete = true;
         this.gotAck = true;
+        this.handshakeRetryCount = 0; // Reset retry count on success
 
         // Start keepalive
         this.startKeepalive();
@@ -203,8 +207,42 @@ export class UdpRelay {
       return;
     }
 
-    this.status.info("Sending handshake (0xCC) to laser");
-    const handshakePacket = Buffer.from([RUIDA_PROTOCOL.CMD_CONNECT]);
+    if (this.handshakeRetryCount >= this.maxHandshakeRetries) {
+      this.status.warn(
+        `Handshake failed after ${this.maxHandshakeRetries} attempts - controller may not support handshake protocol`,
+      );
+      this.status.info(
+        "Proceeding without handshake - first data packet will serve as implicit handshake",
+      );
+      return;
+    }
+
+    this.handshakeRetryCount++;
+    this.status.info(
+      `Sending handshake (0xCC) to laser (attempt ${this.handshakeRetryCount}/${this.maxHandshakeRetries})`,
+    );
+
+    // Create handshake packet with proper encoding and checksum
+    const handshakeData = Buffer.from([RUIDA_PROTOCOL.CMD_CONNECT]);
+
+    // Encode the handshake byte using Ruida protocol scrambling
+    const encodedData = this.encodeBytes(handshakeData);
+
+    // Calculate checksum for the encoded data (MSB first)
+    let checksum = 0;
+    for (const byte of encodedData) {
+      checksum += byte;
+    }
+    checksum = checksum & 0xffff;
+
+    // Create packet with 2-byte checksum header
+    const checksumHeader = Buffer.from([
+      (checksum >> 8) & 0xff, // MSB first
+      checksum & 0xff,
+    ]);
+    const handshakePacket = Buffer.concat([checksumHeader, encodedData]);
+
+    this.status.debug(`Handshake packet: ${handshakePacket.toString("hex")}`);
 
     this.socket.send(
       handshakePacket,
@@ -215,7 +253,7 @@ export class UdpRelay {
     // Set a timeout for handshake response
     setTimeout(() => {
       if (!this.isHandshakeComplete) {
-        this.status.warn("Handshake timeout - retrying");
+        this.status.debug("Handshake timeout - will retry if under limit");
         this.sendHandshake();
       }
     }, RUIDA_PROTOCOL.HANDSHAKE_TIMEOUT);
@@ -227,7 +265,22 @@ export class UdpRelay {
     }
 
     this.status.debug("Sending disconnect (0xCD) to laser");
-    const disconnectPacket = Buffer.from([RUIDA_PROTOCOL.CMD_DISCONNECT]);
+
+    // Create disconnect packet with proper encoding and checksum
+    const disconnectData = Buffer.from([RUIDA_PROTOCOL.CMD_DISCONNECT]);
+    const encodedData = this.encodeBytes(disconnectData);
+
+    let checksum = 0;
+    for (const byte of encodedData) {
+      checksum += byte;
+    }
+    checksum = checksum & 0xffff;
+
+    const checksumHeader = Buffer.from([
+      (checksum >> 8) & 0xff,
+      checksum & 0xff,
+    ]);
+    const disconnectPacket = Buffer.concat([checksumHeader, encodedData]);
 
     this.socket.send(
       disconnectPacket,
@@ -244,7 +297,22 @@ export class UdpRelay {
     this.keepaliveInterval = setInterval(() => {
       if (this.socket && this.isHandshakeComplete && this.gotAck) {
         this.status.debug("Sending keepalive (0xCE) to laser");
-        const keepalivePacket = Buffer.from([RUIDA_PROTOCOL.CMD_KEEPALIVE]);
+
+        // Create keepalive packet with proper encoding and checksum
+        const keepaliveData = Buffer.from([RUIDA_PROTOCOL.CMD_KEEPALIVE]);
+        const encodedData = this.encodeBytes(keepaliveData);
+
+        let checksum = 0;
+        for (const byte of encodedData) {
+          checksum += byte;
+        }
+        checksum = checksum & 0xffff;
+
+        const checksumHeader = Buffer.from([
+          (checksum >> 8) & 0xff,
+          checksum & 0xff,
+        ]);
+        const keepalivePacket = Buffer.concat([checksumHeader, encodedData]);
 
         this.socket.send(
           keepalivePacket,
@@ -303,9 +371,13 @@ export class UdpRelay {
       return;
     }
 
+    // Note: Handshake completion is not required for data transmission
+    // Some Ruida controllers may not implement the handshake protocol
+    // The first data packet will serve as an implicit handshake
     if (!this.isHandshakeComplete) {
-      this.status.warn("Cannot send packet, waiting for handshake to complete");
-      return;
+      this.status.debug(
+        "Handshake not complete, but proceeding with data transmission",
+      );
     }
 
     if (!this.gotAck) {
